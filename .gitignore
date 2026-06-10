@@ -24,3 +24,6 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Manual test files
+manual_test/
