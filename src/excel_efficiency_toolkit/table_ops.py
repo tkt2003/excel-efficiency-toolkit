@@ -1,3 +1,5 @@
+import os
+
 from .excel_com import get_active_excel
 from .name_utils import get_safe_sheet_name, get_unique_sheet_name
 
@@ -52,6 +54,24 @@ def build_split_targets(values: list[object]) -> list[str]:
     return targets
 
 
+def resolve_source_sheet_name(source_sheet_name: str | None, available_names: list[str]) -> str:
+    if not available_names:
+        raise ValueError("工作簿中没有可用工作表。")
+
+    requested_name = "" if source_sheet_name is None else str(source_sheet_name).strip()
+    if not requested_name:
+        if len(available_names) == 1:
+            return available_names[0]
+        raise ValueError("工作簿包含多个工作表，请输入源 sheet 名。")
+
+    lower_names = {name.lower(): name for name in available_names}
+    matched_name = lower_names.get(requested_name.lower())
+    if matched_name:
+        return matched_name
+
+    raise ValueError(f"未找到源 sheet：{requested_name}。")
+
+
 def _normalize_split_target(value: object) -> str:
     target = "空白" if value is None else str(value).strip()
     return target or "空白"
@@ -64,6 +84,40 @@ def _log(logger, level: str, message: str) -> None:
 
 def _get_workbook_sheet_names(workbook) -> set[str]:
     return {sheet.Name for sheet in workbook.Worksheets}
+
+
+def _get_or_open_workbook(source_path: str, logger=None):
+    if not source_path:
+        raise ValueError("请选择源 Excel 工作簿。")
+
+    abs_path = os.path.abspath(source_path)
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"源工作簿不存在：{abs_path}")
+
+    _log(logger, "info", "尝试连接当前运行的 Excel 实例...")
+    excel = get_active_excel()
+    if not excel:
+        import pythoncom
+        import win32com.client
+
+        pythoncom.CoInitialize()
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = True
+
+    normalized_path = os.path.normcase(abs_path)
+    for workbook in excel.Workbooks:
+        try:
+            if os.path.normcase(os.path.abspath(workbook.FullName)) == normalized_path:
+                _log(logger, "info", f"复用已打开工作簿：{workbook.Name}")
+                return workbook
+        except Exception:
+            continue
+
+    try:
+        _log(logger, "info", f"正在打开工作簿：{abs_path}")
+        return excel.Workbooks.Open(abs_path, UpdateLinks=0)
+    except Exception as e:
+        raise RuntimeError(f"打开源工作簿失败，请确认文件未损坏且未被其他 Excel 实例占用：{e}") from e
 
 
 def _get_last_used_row_and_col(sheet) -> tuple[int, int]:
@@ -101,22 +155,14 @@ def _write_range_values(sheet, start_row: int, start_col: int, values: list[list
     ).Value = tuple(tuple(row) for row in values)
 
 
-def merge_visible_sheets_to_new_sheet(
+def _merge_workbook_to_new_sheet(
+    workbook,
     header_row: int = 1,
     data_start_row: int = 2,
     result_sheet_name: str = "合并结果",
     logger=None,
 ) -> dict:
     validate_row_numbers(header_row, data_start_row)
-
-    _log(logger, "info", "尝试连接当前运行的 Excel 实例...")
-    excel = get_active_excel()
-    if not excel:
-        raise RuntimeError("未检测到正在运行的 Excel。请先打开 Excel。")
-
-    workbook = excel.ActiveWorkbook
-    if not workbook:
-        raise RuntimeError("没有打开的工作簿。请先打开或新建一个 Excel 文件。")
 
     source_sheets = [sheet for sheet in workbook.Worksheets if sheet.Visible == XL_SHEET_VISIBLE]
     if not source_sheets:
@@ -167,21 +213,19 @@ def merge_visible_sheets_to_new_sheet(
         _log(logger, "info", f"已合并工作表：{sheet.Name}，追加 {copied_rows} 行。")
 
     return {
+        "workbook_name": workbook.Name,
         "result_sheet_name": unique_name,
         "source_sheet_count": source_sheet_count,
         "appended_row_count": appended_row_count,
     }
 
 
-def split_active_sheet_by_column(
-    column_input: str,
+def merge_visible_sheets_to_new_sheet(
     header_row: int = 1,
     data_start_row: int = 2,
+    result_sheet_name: str = "合并结果",
     logger=None,
 ) -> dict:
-    validate_row_numbers(header_row, data_start_row)
-    column_index = parse_column_index(column_input)
-
     _log(logger, "info", "尝试连接当前运行的 Excel 实例...")
     excel = get_active_excel()
     if not excel:
@@ -191,9 +235,42 @@ def split_active_sheet_by_column(
     if not workbook:
         raise RuntimeError("没有打开的工作簿。请先打开或新建一个 Excel 文件。")
 
-    source_sheet = excel.ActiveSheet
-    if not source_sheet:
-        raise RuntimeError("没有活动的工作表。")
+    return _merge_workbook_to_new_sheet(
+        workbook,
+        header_row=header_row,
+        data_start_row=data_start_row,
+        result_sheet_name=result_sheet_name,
+        logger=logger,
+    )
+
+
+def merge_workbook_sheets_to_new_sheet(
+    source_path: str,
+    header_row: int = 1,
+    data_start_row: int = 2,
+    result_sheet_name: str = "合并结果",
+    logger=None,
+) -> dict:
+    workbook = _get_or_open_workbook(source_path, logger)
+    return _merge_workbook_to_new_sheet(
+        workbook,
+        header_row=header_row,
+        data_start_row=data_start_row,
+        result_sheet_name=result_sheet_name,
+        logger=logger,
+    )
+
+
+def _split_workbook_sheet_by_column(
+    workbook,
+    source_sheet,
+    column_input: str,
+    header_row: int = 1,
+    data_start_row: int = 2,
+    logger=None,
+) -> dict:
+    validate_row_numbers(header_row, data_start_row)
+    column_index = parse_column_index(column_input)
 
     _log(logger, "info", f"准备拆分工作表：{source_sheet.Name}，拆分列：{column_input.strip()}（第 {column_index} 列）")
 
@@ -232,7 +309,60 @@ def split_active_sheet_by_column(
 
     _log(logger, "info", f"拆分完成，共生成 {created_sheet_count} 个工作表，复制 {copied_row_count} 行。")
     return {
+        "workbook_name": workbook.Name,
         "source_sheet_name": source_sheet.Name,
         "created_sheet_count": created_sheet_count,
         "copied_row_count": copied_row_count,
     }
+
+
+def split_active_sheet_by_column(
+    column_input: str,
+    header_row: int = 1,
+    data_start_row: int = 2,
+    logger=None,
+) -> dict:
+    _log(logger, "info", "尝试连接当前运行的 Excel 实例...")
+    excel = get_active_excel()
+    if not excel:
+        raise RuntimeError("未检测到正在运行的 Excel。请先打开 Excel。")
+
+    workbook = excel.ActiveWorkbook
+    if not workbook:
+        raise RuntimeError("没有打开的工作簿。请先打开或新建一个 Excel 文件。")
+
+    source_sheet = excel.ActiveSheet
+    if not source_sheet:
+        raise RuntimeError("没有活动的工作表。")
+
+    return _split_workbook_sheet_by_column(
+        workbook,
+        source_sheet,
+        column_input=column_input,
+        header_row=header_row,
+        data_start_row=data_start_row,
+        logger=logger,
+    )
+
+
+def split_workbook_sheet_by_column(
+    source_path: str,
+    source_sheet_name: str | None,
+    column_input: str,
+    header_row: int = 1,
+    data_start_row: int = 2,
+    logger=None,
+) -> dict:
+    workbook = _get_or_open_workbook(source_path, logger)
+    sheet_names = [sheet.Name for sheet in workbook.Worksheets]
+    resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
+    source_sheet = workbook.Worksheets(resolved_name)
+
+    return _split_workbook_sheet_by_column(
+        workbook,
+        source_sheet,
+        column_input=column_input,
+        header_row=header_row,
+        data_start_row=data_start_row,
+        logger=logger,
+    )

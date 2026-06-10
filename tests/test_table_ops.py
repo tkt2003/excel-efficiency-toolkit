@@ -4,6 +4,7 @@ from src.excel_efficiency_toolkit.table_ops import (
     build_split_targets,
     normalize_header_row,
     parse_column_index,
+    resolve_source_sheet_name,
     validate_row_numbers,
 )
 
@@ -71,3 +72,22 @@ def test_build_split_targets_deduplicates_and_keeps_first_seen_order():
 
 def test_build_split_targets_converts_blank_values_to_blank_label():
     assert build_split_targets([None, "", "   ", "A", None]) == ["空白", "A"]
+
+
+def test_resolve_source_sheet_name_uses_single_sheet_when_input_is_empty():
+    assert resolve_source_sheet_name("", ["Data"]) == "Data"
+    assert resolve_source_sheet_name(None, ["Data"]) == "Data"
+
+
+def test_resolve_source_sheet_name_requires_name_for_multiple_sheets():
+    with pytest.raises(ValueError, match="多个工作表"):
+        resolve_source_sheet_name("", ["Data", "Summary"])
+
+
+def test_resolve_source_sheet_name_matches_case_insensitive_name():
+    assert resolve_source_sheet_name("data", ["Data", "Summary"]) == "Data"
+
+
+def test_resolve_source_sheet_name_rejects_missing_name():
+    with pytest.raises(ValueError, match="未找到源 sheet"):
+        resolve_source_sheet_name("Missing", ["Data"])

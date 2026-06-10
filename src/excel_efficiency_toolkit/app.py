@@ -2,11 +2,11 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, simpledialog
 from .export_ops import export_workbook_sheets_to_files
 from .logging_utils import setup_logger
-from .sheet_ops import generate_sheet_index_with_links, list_sheet_names_to_active_sheet
+from .sheet_ops import generate_sheet_index_sheet_with_links
 from .table_ops import (
-    merge_visible_sheets_to_new_sheet,
+    merge_workbook_sheets_to_new_sheet,
     parse_column_index,
-    split_active_sheet_by_column,
+    split_workbook_sheet_by_column,
     validate_row_numbers,
 )
 
@@ -19,15 +19,6 @@ class ExcelToolkitApp:
         # 顶部按钮区域
         self.frame_top = tk.Frame(root)
         self.frame_top.pack(pady=20, fill=tk.X)
-
-        self.btn_list_sheets = tk.Button(
-            self.frame_top,
-            text="列出当前工作簿所有工作表",
-            font=("Microsoft YaHei", 12),
-            command=self.run_list_sheets,
-            bg="#f0f0f0"
-        )
-        self.btn_list_sheets.pack()
 
         self.btn_export_sheets = tk.Button(
             self.frame_top,
@@ -49,7 +40,7 @@ class ExcelToolkitApp:
 
         self.btn_split_sheet = tk.Button(
             self.frame_top,
-            text="按指定列拆分当前表为多个工作表",
+            text="按指定列拆分工作表",
             font=("Microsoft YaHei", 12),
             command=self.run_split_sheet,
             bg="#f0f0f0"
@@ -84,14 +75,6 @@ class ExcelToolkitApp:
         # 初始化自定义 logger
         self.logger = setup_logger(self.log_text)
         self.logger.info("欢迎使用 Excel 效率工具台。程序已就绪。")
-
-    def run_list_sheets(self):
-        """按钮回调函数，执行获取工作表的操作"""
-        self.btn_list_sheets.config(state="disabled")
-        try:
-            list_sheet_names_to_active_sheet(self.logger)
-        finally:
-            self.btn_list_sheets.config(state="normal")
 
     def run_export_sheets(self):
         """按钮回调函数，将一个工作簿按工作表拆分为多个文件"""
@@ -132,7 +115,18 @@ class ExcelToolkitApp:
             raise ValueError(f"{prompt}必须是整数。")
 
     def run_merge_sheets(self):
-        """按钮回调函数，将可见工作表合并到一个新工作表"""
+        """按钮回调函数，将所选工作簿中的可见工作表合并到一个新工作表"""
+        source_path = filedialog.askopenfilename(
+            title="请选择源 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_path:
+            self.logger.info("用户已取消操作")
+            return
+
         result_sheet_name = simpledialog.askstring(
             "多表合并",
             "结果 sheet 名：",
@@ -159,12 +153,15 @@ class ExcelToolkitApp:
 
         self.btn_merge_sheets.config(state="disabled")
         try:
-            result = merge_visible_sheets_to_new_sheet(
+            self.logger.info(f"源工作簿：{source_path}")
+            result = merge_workbook_sheets_to_new_sheet(
+                source_path=source_path,
                 header_row=header_row,
                 data_start_row=data_start_row,
                 result_sheet_name=result_sheet_name,
                 logger=self.logger,
             )
+            self.logger.info(f"工作簿名：{result['workbook_name']}")
             self.logger.info(f"结果 sheet 名：{result['result_sheet_name']}")
             self.logger.info(f"合并 sheet 数：{result['source_sheet_count']}")
             self.logger.info(f"追加行数：{result['appended_row_count']}")
@@ -174,7 +171,27 @@ class ExcelToolkitApp:
             self.btn_merge_sheets.config(state="normal")
 
     def run_split_sheet(self):
-        """按钮回调函数，按指定列拆分当前活动工作表"""
+        """按钮回调函数，按指定列拆分所选工作簿中的指定工作表"""
+        source_path = filedialog.askopenfilename(
+            title="请选择源 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_path:
+            self.logger.info("用户已取消操作")
+            return
+
+        source_sheet_name = simpledialog.askstring(
+            "按列拆分",
+            "源 sheet 名（只有一个 sheet 时可留空）：",
+            parent=self.root,
+        )
+        if source_sheet_name is None:
+            self.logger.info("用户已取消操作")
+            return
+
         column_input = simpledialog.askstring(
             "按列拆分",
             "拆分列，例如 A、B、C 或 1、2、3：",
@@ -201,12 +218,16 @@ class ExcelToolkitApp:
 
         self.btn_split_sheet.config(state="disabled")
         try:
-            result = split_active_sheet_by_column(
+            self.logger.info(f"源工作簿：{source_path}")
+            result = split_workbook_sheet_by_column(
+                source_path=source_path,
+                source_sheet_name=source_sheet_name,
                 column_input=column_input,
                 header_row=header_row,
                 data_start_row=data_start_row,
                 logger=self.logger,
             )
+            self.logger.info(f"工作簿名：{result['workbook_name']}")
             self.logger.info(f"源 sheet 名：{result['source_sheet_name']}")
             self.logger.info(f"生成 sheet 数：{result['created_sheet_count']}")
             self.logger.info(f"复制行数：{result['copied_row_count']}")
@@ -216,11 +237,25 @@ class ExcelToolkitApp:
             self.btn_split_sheet.config(state="normal")
 
     def run_sheet_index(self):
-        """按钮回调函数，生成带超链接的工作表目录"""
+        """按钮回调函数，在所选工作簿中生成带超链接的工作表目录"""
+        source_path = filedialog.askopenfilename(
+            title="请选择源 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_path:
+            self.logger.info("用户已取消操作")
+            return
+
         self.btn_sheet_index.config(state="disabled")
         try:
-            result = generate_sheet_index_with_links(self.logger)
-            self.logger.info(f"工作表数量：{result['sheet_count']}")
+            result = generate_sheet_index_sheet_with_links(source_path=source_path, logger=self.logger)
+            self.logger.info(f"源工作簿路径：{source_path}")
+            self.logger.info(f"工作簿名：{result['workbook_name']}")
+            self.logger.info(f"目录 sheet 名：{result['index_sheet_name']}")
+            self.logger.info(f"收录 sheet 数量：{result['sheet_count']}")
         except Exception as e:
             self.logger.error(f"生成带链接的工作表目录失败：{e}")
         finally:
