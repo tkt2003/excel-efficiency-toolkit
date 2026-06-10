@@ -1,5 +1,7 @@
+import os
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, simpledialog
+from .delete_sheet_ops import generate_delete_sheet_rule_table
 from .export_ops import export_workbook_sheets_to_files
 from .logging_utils import setup_logger
 from .sheet_ops import generate_sheet_index_sheet_with_links
@@ -55,6 +57,15 @@ class ExcelToolkitApp:
             bg="#f0f0f0"
         )
         self.btn_sheet_index.pack(pady=(10, 0))
+
+        self.btn_delete_sheets = tk.Button(
+            self.frame_top,
+            text="批量删除工作表",
+            font=("Microsoft YaHei", 12),
+            command=self.run_delete_sheets,
+            bg="#f0f0f0"
+        )
+        self.btn_delete_sheets.pack(pady=(10, 0))
 
         # 底部日志区域
         self.frame_bottom = tk.Frame(root)
@@ -260,6 +271,54 @@ class ExcelToolkitApp:
             self.logger.error(f"生成带链接的工作表目录失败：{e}")
         finally:
             self.btn_sheet_index.config(state="normal")
+
+    def run_delete_sheets(self):
+        """按钮回调函数，第一阶段仅生成批量删除规则表"""
+        source_paths = filedialog.askopenfilenames(
+            title="请选择要扫描的 Excel 文件",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_paths:
+            self.logger.info("用户已取消操作")
+            return
+
+        output_path = filedialog.asksaveasfilename(
+            title="请选择规则表保存位置",
+            defaultextension=".xlsx",
+            initialfile="批量删除工作表_规则表.xlsx",
+            filetypes=[
+                ("Excel 文件", "*.xlsx"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not output_path:
+            self.logger.info("用户已取消操作")
+            return
+
+        self.btn_delete_sheets.config(state="disabled")
+        try:
+            result = generate_delete_sheet_rule_table(
+                source_paths=list(source_paths),
+                output_path=output_path,
+                logger=self.logger,
+            )
+            self.logger.info(f"选择文件数量：{result['source_file_count']}")
+            self.logger.info(f"读取成功文件数：{result['read_success_count']}")
+            self.logger.info(f"唯一表格名数量：{result['unique_sheet_count']}")
+            self.logger.info(f"规则表保存路径：{result['output_path']}")
+            self.logger.info("本阶段仅生成规则表，未执行任何删除操作。")
+            try:
+                os.startfile(result["output_path"])
+                self.logger.info("规则表已自动打开，请填写 B/C/D 列。")
+            except Exception as open_error:
+                self.logger.error(f"规则表已生成，但自动打开失败：{open_error}")
+        except Exception as e:
+            self.logger.error(f"生成批量删除规则表失败：{e}")
+        finally:
+            self.btn_delete_sheets.config(state="normal")
 
 def main():
     root = tk.Tk()
