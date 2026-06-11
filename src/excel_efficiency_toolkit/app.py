@@ -51,8 +51,8 @@ class ExcelToolkitApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Excel 效率工具台")
-        self.root.geometry("860x680")
-        self.root.minsize(780, 620)
+        self.root.geometry("860x760")
+        self.root.minsize(780, 720)
         self.bg_color = "#f5f6f8"
         self.card_color = "#ffffff"
         self.border_color = "#d7dce2"
@@ -980,14 +980,14 @@ class ExcelToolkitApp:
         """按钮回调函数，按当前活动 sheet 和选中单元格批量穿透读取源工作簿取值"""
         self._log_info("数据穿透取数：开始操作。")
         try:
-            context = self._get_current_excel_context_for_data_drill()
+            context = self._get_active_excel_drill_context()
             if not self._confirm_data_drill_context(context):
                 self._log_info("用户已取消操作。")
                 return
 
             source_paths = filedialog.askopenfilenames(
                 title="请选择源 Excel 文件",
-                initialdir=context["workbook_dir"],
+                initialdir=context["output_dir"],
                 filetypes=[
                     ("Excel 文件", "*.xlsx *.xlsm *.xls"),
                     ("所有文件", "*.*"),
@@ -998,7 +998,7 @@ class ExcelToolkitApp:
                 return
 
             self.btn_data_drill.config(state="disabled")
-            output_path = build_unique_output_path(context["workbook_dir"])
+            output_path = build_unique_output_path(context["output_dir"])
             self._log_info(
                 f"当前取数点：{context['sheet_name']}!{context['cell_address']}；"
                 f"源文件数量：{len(source_paths)}。"
@@ -1071,6 +1071,9 @@ class ExcelToolkitApp:
         return choice == "continue"
 
     def _get_current_excel_context_for_data_drill(self):
+        return self._get_active_excel_drill_context()
+
+    def _get_active_excel_drill_context(self):
         try:
             import pythoncom
             import win32com.client
@@ -1078,50 +1081,143 @@ class ExcelToolkitApp:
             raise RuntimeError("无法加载 Excel COM 组件，请确认已安装 pywin32 并在 Windows + Excel 环境运行。") from e
 
         pythoncom.CoInitialize()
+        steps = []
         try:
             try:
                 excel = win32com.client.GetActiveObject("Excel.Application")
             except Exception as e:
-                raise RuntimeError("未检测到正在运行的 Excel，请先打开目标/合并工作簿后重试。") from e
+                raise RuntimeError(
+                    "未检测到正在运行的 Excel，请先打开目标/合并工作簿后重试。"
+                    "当前步骤：尚未连接 Excel。"
+                ) from e
+            steps.append("已连接 Excel")
 
             try:
                 workbook = excel.ActiveWorkbook
             except Exception as e:
-                raise RuntimeError("Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。") from e
+                raise RuntimeError(
+                    "Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。"
+                    f"当前步骤：{self._format_data_drill_context_steps(steps)}。"
+                ) from e
             if workbook is None:
-                raise RuntimeError("Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。")
+                raise RuntimeError(
+                    "Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。"
+                    f"当前步骤：{self._format_data_drill_context_steps(steps)}。"
+                )
+            steps.append("已取得 ActiveWorkbook")
 
             workbook_name = str(workbook.Name)
             workbook_dir = str(workbook.Path or "").strip()
             if not workbook_dir:
-                raise RuntimeError("当前活动工作簿尚未保存，无法确定结果文件输出目录。请先保存当前工作簿后重试。")
+                raise RuntimeError(
+                    "当前活动工作簿尚未保存，无法确定结果文件输出目录。请先保存当前工作簿后重试。"
+                    f"当前步骤：{self._format_data_drill_context_steps(steps)}。"
+                )
             workbook_path = str(workbook.FullName or "").strip()
             if not os.path.dirname(workbook_path):
                 workbook_path = os.path.join(workbook_dir, workbook_name)
+            steps.append("已取得工作簿保存路径")
 
             try:
                 active_sheet = excel.ActiveSheet
                 sheet_name = str(active_sheet.Name)
             except Exception as e:
-                raise RuntimeError("无法读取当前活动 Sheet，请先切换到目标工作表后重试。") from e
+                raise RuntimeError(
+                    "无法读取当前活动 Sheet，请先切换到目标工作表后重试。"
+                    f"当前步骤：{self._format_data_drill_context_steps(steps)}。"
+                ) from e
+            if not sheet_name:
+                raise RuntimeError(
+                    "无法读取当前活动 Sheet，请先切换到目标工作表后重试。"
+                    f"当前步骤：{self._format_data_drill_context_steps(steps)}。"
+                )
+            steps.append("已取得 ActiveSheet")
 
-            try:
-                active_cell = excel.ActiveCell
-                cell_address = str(active_cell.Address(False, False)).replace("$", "").strip()
-            except Exception as e:
-                raise RuntimeError("没有有效选区，请先选中一个需要追查的单元格后重试。") from e
+            cell_address = self._get_active_cell_address_for_data_drill(excel)
             if not cell_address:
-                raise RuntimeError("没有有效选区，请先选中一个需要追查的单元格后重试。")
+                raise RuntimeError(
+                    "没有有效选区，请先选中一个需要追查的单元格后重试。"
+                    f"当前步骤：{self._format_data_drill_context_steps(steps)}，但未取得 ActiveCell 或可用 Selection。"
+                )
+            steps.append("已取得 ActiveCell")
 
             return {
                 "workbook_name": workbook_name,
                 "workbook_path": workbook_path,
+                "output_dir": workbook_dir,
                 "workbook_dir": workbook_dir,
                 "sheet_name": sheet_name,
                 "cell_address": cell_address,
             }
         finally:
             pythoncom.CoUninitialize()
+
+    def _get_active_cell_address_for_data_drill(self, excel):
+        active_cell_error = None
+        try:
+            active_cell = excel.ActiveCell
+            cell_address = self._get_cell_address_for_data_drill(active_cell)
+            if cell_address:
+                return cell_address
+        except Exception as e:
+            active_cell_error = e
+
+        try:
+            selection = excel.Selection
+        except Exception as e:
+            detail = f"已连接 Excel，但未取得 ActiveCell，也无法读取 Selection：{e}"
+            if active_cell_error is not None:
+                detail = f"已连接 Excel，但未取得 ActiveCell：{active_cell_error}；无法读取 Selection：{e}"
+            raise RuntimeError(detail) from e
+
+        cell_address = self._get_selection_cell_address_for_data_drill(selection)
+        if cell_address:
+            return cell_address
+
+        detail = "已连接 Excel，但未取得 ActiveCell；Selection 不是可识别的单元格区域。"
+        if active_cell_error is not None:
+            detail = f"已连接 Excel，但未取得 ActiveCell：{active_cell_error}；Selection 不是可识别的单元格区域。"
+        raise RuntimeError(detail)
+
+    def _get_selection_cell_address_for_data_drill(self, selection):
+        if selection is None:
+            return None
+
+        cell_candidates = [
+            lambda: selection.Cells(1, 1),
+            lambda: selection.Cells.Item(1, 1),
+            lambda: selection.Areas(1).Cells(1, 1),
+            lambda: selection.Item(1, 1),
+            lambda: selection,
+        ]
+        for get_cell in cell_candidates:
+            try:
+                cell_address = self._get_cell_address_for_data_drill(get_cell())
+                if cell_address:
+                    return self._left_top_cell_address(cell_address)
+            except Exception:
+                continue
+        return None
+
+    def _get_cell_address_for_data_drill(self, cell):
+        if cell is None:
+            return None
+        try:
+            address_member = cell.Address
+            if callable(address_member):
+                address = address_member(False, False)
+            else:
+                address = address_member
+        except Exception:
+            address = cell.Address(False, False)
+        return self._left_top_cell_address(address)
+
+    def _left_top_cell_address(self, address):
+        first_area = str(address or "").split(",")[0].strip()
+        return first_area.split(":")[0].replace("$", "").strip()
+
+    def _format_data_drill_context_steps(self, steps):
+        return "、".join(steps) if steps else "尚未连接 Excel"
 
     def _log_single_color_sum_result(self, result):
         self._log_info(
