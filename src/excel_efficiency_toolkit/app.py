@@ -15,6 +15,10 @@ from .delete_sheet_ops import (
     read_rule_values_from_rule_table,
 )
 from .export_ops import export_workbook_sheets_to_files
+from .link_replace_ops import (
+    execute_link_replacement_from_rule_workbook,
+    generate_temporary_link_replace_rule_workbook,
+)
 from .logging_utils import setup_logger
 from .rename_file_ops import (
     build_rename_plan,
@@ -136,6 +140,7 @@ class ExcelToolkitApp:
             right_column,
             "批量维护",
             [
+                ("批量换链接", "btn_link_replace", self.run_batch_link_replace),
                 ("批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
                 ("批量重命名文件", "btn_rename_files", self.run_batch_rename_files),
                 ("批量重命名工作表", "btn_rename_sheets", self.run_batch_rename_sheets),
@@ -1360,6 +1365,157 @@ class ExcelToolkitApp:
             return None
 
         return mode
+
+    def run_batch_link_replace(self):
+        """按钮回调函数，扫描外部链接并按规则批量 ChangeLink"""
+        self.logger.info("批量换链接：开始操作。")
+        source_paths = filedialog.askopenfilenames(
+            title="请选择需要批量换链接的 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_paths:
+            self.logger.info("用户已取消操作")
+            return
+
+        self.btn_link_replace.config(state="disabled")
+        try:
+            result = generate_temporary_link_replace_rule_workbook(
+                source_paths=list(source_paths),
+                logger=self._flushing_logger(),
+            )
+            self.logger.info(f"选择文件数量：{result['source_file_count']}")
+            self.logger.info(f"读取成功文件数：{result['read_success_count']}")
+            self.logger.info(f"扫描到外部链接数量：{result['link_count']}")
+            self.logger.info(f"临时规则表路径：{result['output_path']}")
+
+            try:
+                os.startfile(result["output_path"])
+                self.logger.info("规则表已自动打开。请填写 D 列，保存并关闭规则表后，再点击弹窗中的执行按钮。")
+            except Exception as open_error:
+                self.logger.error(f"规则表已生成，但自动打开失败：{open_error}")
+                self.logger.info(f"请手动打开规则表：{result['output_path']}")
+
+            if not self._confirm_link_replace_rule_ready(result["output_path"]):
+                self.logger.info("用户已取消操作")
+        except Exception as e:
+            self.logger.error(f"批量换链接失败：{e}")
+            self._show_info_no_grab(
+                "批量换链接",
+                f"批量换链接失败：{e}",
+                dialog_width=520,
+                wraplength=460,
+            )
+        finally:
+            self.btn_link_replace.config(state="normal")
+
+    def _confirm_link_replace_rule_ready(self, rule_workbook_path):
+        result = {"execute": False}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("批量换链接")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=(
+                "规则表已打开。\n"
+                "请在【链接清单】D列填写新链接路径，E列可填写是否执行，\n"
+                "保存并关闭/释放规则表后，再点击执行。"
+            ),
+            font=("Microsoft YaHei", 11),
+            wraplength=420,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+
+        def execute():
+            execute_button.config(state="disabled")
+            try:
+                self.logger.info(f"正在执行批量换链接规则表：{rule_workbook_path}")
+                try:
+                    summary = execute_link_replacement_from_rule_workbook(
+                        rule_workbook_path,
+                        logger=self._flushing_logger(),
+                    )
+                except (PermissionError, OSError) as e:
+                    self.logger.error(f"规则表无法读取或回写：{e}")
+                    self._show_link_replace_rule_workbook_busy_message()
+                    return
+
+                result_message = (
+                    "批量换链接完成。\n"
+                    f"规则行数：{summary['rule_count']}\n"
+                    f"成功：{summary['success_count']} 个\n"
+                    f"跳过：{summary['skipped_count']} 个\n"
+                    f"失败：{summary['failed_count']} 个\n\n"
+                    "规则表已更新状态和处理日志。\n"
+                    "成功处理的目标工作簿已按参数保存。"
+                )
+                self.logger.info(
+                    "批量换链接完成："
+                    f"成功 {summary['success_count']} 个；"
+                    f"跳过 {summary['skipped_count']} 个；"
+                    f"失败 {summary['failed_count']} 个。"
+                )
+                self._show_info_no_grab("批量换链接", result_message, dialog_width=520, wraplength=460)
+                result["execute"] = True
+                done.set(True)
+                dialog.destroy()
+            except Exception as e:
+                self.logger.error(f"批量换链接失败：{e}")
+                self._show_info_no_grab(
+                    "批量换链接",
+                    f"批量换链接失败：{e}",
+                    dialog_width=520,
+                    wraplength=460,
+                )
+            finally:
+                if dialog.winfo_exists():
+                    execute_button.config(state="normal")
+
+        def cancel():
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT)
+        execute_button = tk.Button(
+            button_frame,
+            text="我已填好规则，执行批量换链接",
+            command=execute,
+            font=("Microsoft YaHei", 10),
+            width=32,
+        )
+        execute_button.pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        self._show_dialog_no_grab(dialog, min_width=520, min_height=180)
+        self.root.wait_variable(done)
+        return result["execute"]
+
+    def _show_link_replace_rule_workbook_busy_message(self):
+        self.logger.error("规则表仍被 Excel 占用，无法继续执行。请保存并关闭规则表后重试。")
+        self._show_info_no_grab(
+            "批量换链接",
+            "规则表仍被 Excel 占用，无法读取或回写。\n"
+            "请先保存并关闭规则表，再点击执行批量换链接。",
+            dialog_width=500,
+            wraplength=440,
+        )
 
     def _confirm_sheet_rename_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
