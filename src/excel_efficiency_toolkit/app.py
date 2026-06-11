@@ -1,7 +1,7 @@
 import os
 import tkinter as tk
 from tkinter import filedialog, scrolledtext
-from .color_sum_ops import sum_current_sheet_by_fill_color
+from .color_sum_ops import sum_current_sheet_by_fill_color, sum_matching_sheets_by_fill_color
 from .delete_sheet_ops import (
     execute_batch_delete_sheets_in_place,
     generate_temporary_delete_sheet_rule_table,
@@ -524,16 +524,32 @@ class ExcelToolkitApp:
         """按钮回调函数，按当前选中单元格填充色汇总指定 sheet 的同地址单元格"""
         self._log_info("按颜色汇总求和：开始操作。")
         try:
-            target_sheet_name = self._ask_text_no_grab(
+            sum_scope = self._ask_choice_no_grab(
                 "按颜色汇总求和",
-                "请输入要汇总的 sheet 名；留空则使用当前活动 sheet。",
-                entry_width=26,
-                dialog_width=360,
-                wraplength=320,
+                "请选择汇总范围：\n1 仅汇总一个 sheet\n2 汇总所有匹配 sheet",
+                [
+                    ("仅汇总一个 sheet", "single"),
+                    ("汇总所有匹配 sheet", "all"),
+                ],
+                dialog_width=440,
+                wraplength=380,
             )
-            if target_sheet_name is None:
+            if sum_scope is None:
                 self._log_info("用户已取消操作。")
                 return
+
+            target_sheet_name = None
+            if sum_scope == "single":
+                target_sheet_name = self._ask_text_no_grab(
+                    "按颜色汇总求和",
+                    "请输入要汇总的 sheet 名；留空则使用当前活动 sheet。",
+                    entry_width=26,
+                    dialog_width=360,
+                    wraplength=320,
+                )
+                if target_sheet_name is None:
+                    self._log_info("用户已取消操作。")
+                    return
 
             source_paths = filedialog.askopenfilenames(
                 title="请选择源 Excel 文件",
@@ -559,34 +575,75 @@ class ExcelToolkitApp:
                 return
 
             self.btn_color_sum.config(state="disabled")
-            result = sum_current_sheet_by_fill_color(
-                source_paths=list(source_paths),
-                write_mode=write_mode,
-                target_sheet_name=target_sheet_name,
-                logger=self._flushing_logger(),
-            )
-            self._log_info(
-                "按颜色汇总求和完成："
-                f"写入 {result['written_cell_count']} 个单元格；"
-                f"找到同名工作表源文件 {result['matched_source_file_count']} 个；"
-                f"缺少同名工作表 {result['missing_sheet_file_count']} 个；"
-                f"忽略非数字 {result['ignored_non_numeric_count']} 个。"
-            )
-            self._log_info("目标工作簿未自动保存，请检查后自行保存。")
-            self._show_info_no_grab(
-                "按颜色汇总求和",
-                "汇总完成。\n"
-                f"目标工作表：{result['target_sheet_name']}\n"
-                f"写入单元格：{result['written_cell_count']}\n"
-                f"参与源文件：{result['matched_source_file_count']}\n"
-                f"缺少同名工作表：{result['missing_sheet_file_count']}\n"
-                f"忽略非数字：{result['ignored_non_numeric_count']}\n\n"
-                "目标工作簿未自动保存，请检查后自行保存。",
-            )
+            if sum_scope == "single":
+                result = sum_current_sheet_by_fill_color(
+                    source_paths=list(source_paths),
+                    write_mode=write_mode,
+                    target_sheet_name=target_sheet_name,
+                    logger=self._flushing_logger(),
+                )
+                self._log_single_color_sum_result(result)
+                self._show_single_color_sum_result(result)
+            else:
+                result = sum_matching_sheets_by_fill_color(
+                    source_paths=list(source_paths),
+                    write_mode=write_mode,
+                    logger=self._flushing_logger(),
+                )
+                self._log_all_color_sum_result(result)
+                self._show_all_color_sum_result(result)
         except Exception as e:
             self._log_error(f"按颜色汇总求和失败：{type(e).__name__}: {e}")
         finally:
             self.btn_color_sum.config(state="normal")
+
+    def _log_single_color_sum_result(self, result):
+        self._log_info(
+            "按颜色汇总求和完成："
+            f"写入 {result['written_cell_count']} 个单元格；"
+            f"找到同名工作表源文件 {result['matched_source_file_count']} 个；"
+            f"缺少同名工作表 {result['missing_sheet_file_count']} 个；"
+            f"忽略非数字 {result['ignored_non_numeric_count']} 个。"
+        )
+        self._log_info("目标工作簿未自动保存，请检查后自行保存。")
+
+    def _show_single_color_sum_result(self, result):
+        self._show_info_no_grab(
+            "按颜色汇总求和",
+            "汇总完成。\n"
+            f"目标工作表：{result['target_sheet_name']}\n"
+            f"写入单元格：{result['written_cell_count']}\n"
+            f"参与源文件：{result['matched_source_file_count']}\n"
+            f"缺少同名工作表：{result['missing_sheet_file_count']}\n"
+            f"忽略非数字：{result['ignored_non_numeric_count']}\n\n"
+            "目标工作簿未自动保存，请检查后自行保存。",
+        )
+
+    def _log_all_color_sum_result(self, result):
+        self._log_info(
+            "按颜色汇总求和完成："
+            f"目标计划匹配 {result['matched_sheet_count']} 个工作表；"
+            f"实际写入 {result['written_sheet_count']} 个工作表、{result['written_cell_count']} 个单元格；"
+            f"参与源文件 {result['matched_source_file_count']} 个；"
+            f"匹配源工作表 {result['matched_source_sheet_count']} 个；"
+            f"缺少同名工作表 {result['missing_sheet_file_count']} 个；"
+            f"忽略非数字 {result['ignored_non_numeric_count']} 个。"
+        )
+        self._log_info("目标工作簿未自动保存，请检查后自行保存。")
+
+    def _show_all_color_sum_result(self, result):
+        self._show_info_no_grab(
+            "按颜色汇总求和",
+            "汇总完成。\n"
+            f"目标计划匹配工作表：{result['matched_sheet_count']}\n"
+            f"实际写入工作表：{result['written_sheet_count']}\n"
+            f"写入单元格：{result['written_cell_count']}\n"
+            f"参与源文件：{result['matched_source_file_count']}\n"
+            f"匹配源工作表：{result['matched_source_sheet_count']}\n"
+            f"缺少同名工作表：{result['missing_sheet_file_count']}\n"
+            f"忽略非数字：{result['ignored_non_numeric_count']}\n\n"
+            "目标工作簿未自动保存，请检查后自行保存。",
+        )
 
     def _confirm_delete_rule_ready(self, rule_table_path):
         result = {"execute": False}
