@@ -42,6 +42,10 @@ from .rename_sheet_ops import (
     summarize_sheet_rename_actions,
     write_sheet_rename_results_to_workbook,
 )
+from .report_generate_ops import (
+    DEFAULT_CHECKLIST_SHEET_NAME,
+    generate_reports_from_checklist,
+)
 from .sheet_ops import generate_sheet_index_sheet_with_links
 from .table_ops import (
     merge_workbook_sheets_to_new_sheet,
@@ -126,6 +130,7 @@ class ExcelToolkitApp:
             [
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
                 ("数据穿透取数", "btn_data_drill", self.run_data_drill),
+                ("按清单生成报表", "btn_report_generate", self.run_report_generate),
             ],
         )
 
@@ -1057,6 +1062,97 @@ class ExcelToolkitApp:
             )
         finally:
             self.btn_data_drill.config(state="normal")
+
+    def run_report_generate(self):
+        """按钮回调函数，按模板清单逐行复制完整工作簿并替换外部链接"""
+        self._log_info("按清单生成报表：开始操作。")
+        template_path = filedialog.askopenfilename(
+            title="请选择模板 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not template_path:
+            self._log_info("用户已取消操作。")
+            return
+
+        sheet_name = self._ask_text_no_grab(
+            "按清单生成报表",
+            "请输入清单 sheet 名：",
+            default=DEFAULT_CHECKLIST_SHEET_NAME,
+            entry_width=24,
+            dialog_width=360,
+        )
+        if sheet_name is None:
+            self._log_info("用户已取消操作。")
+            return
+        sheet_name = sheet_name.strip() or DEFAULT_CHECKLIST_SHEET_NAME
+
+        output_dir = filedialog.askdirectory(title="请选择输出目录")
+        if not output_dir:
+            self._log_info("用户已取消操作。")
+            return
+
+        choice = self._ask_choice_no_grab(
+            "按清单生成报表",
+            "请确认生成口径：\n"
+            f"模板路径：{template_path}\n"
+            f"清单 sheet：{sheet_name}\n"
+            f"输出目录：{output_dir}\n\n"
+            "清单字段固定为：A列新 TB / 新链接文件路径，B列输出文件名主体，"
+            "C列公司名称，D列报表类型。\n"
+            "程序会逐行复制完整模板工作簿，并把模板外部链接替换为 A 列路径。\n"
+            "原模板工作簿不会被修改。",
+            [("开始生成", "run")],
+            dialog_width=680,
+            wraplength=620,
+        )
+        if choice != "run":
+            self._log_info("用户已取消操作。")
+            return
+
+        self.btn_report_generate.config(state="disabled")
+        try:
+            result = generate_reports_from_checklist(
+                template_path=template_path,
+                sheet_name=sheet_name,
+                output_dir=output_dir,
+                logger=self._flushing_logger(),
+            )
+            self._log_info(
+                "按清单生成报表完成："
+                f"成功 {result['success_count']} 个；"
+                f"跳过 {result['skipped_count']} 个；"
+                f"失败 {result['failed_count']} 个；"
+                f"模板外部链接 {result['template_link_count']} 个。"
+            )
+            for record in result["records"]:
+                self._log_info(
+                    f"第 {record['row_number']} 行：{record['status']}，"
+                    f"{record['message']}，输出：{record.get('output_path') or '-'}"
+                )
+            self._show_info_no_grab(
+                "按清单生成报表",
+                "生成完成。\n"
+                f"成功数量：{result['success_count']}\n"
+                f"跳过数量：{result['skipped_count']}\n"
+                f"失败数量：{result['failed_count']}\n"
+                f"输出目录：{result['output_dir']}\n\n"
+                "原模板工作簿未被修改。",
+                dialog_width=560,
+                wraplength=500,
+            )
+        except Exception as e:
+            self._log_error(f"按清单生成报表失败：{type(e).__name__}: {e}")
+            self._show_info_no_grab(
+                "按清单生成报表",
+                f"按清单生成报表失败：{e}",
+                dialog_width=560,
+                wraplength=500,
+            )
+        finally:
+            self.btn_report_generate.config(state="normal")
 
     def _confirm_data_drill_context(self, context):
         choice = self._ask_choice_no_grab(
