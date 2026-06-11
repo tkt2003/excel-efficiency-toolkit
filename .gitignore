@@ -28,3 +28,5 @@ Thumbs.db
 
 # Manual test files
 manual_test/
+
+.claude/
