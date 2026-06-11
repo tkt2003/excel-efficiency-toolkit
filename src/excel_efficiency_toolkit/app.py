@@ -46,6 +46,7 @@ from .report_generate_ops import (
     DEFAULT_CHECKLIST_SHEET_NAME,
     generate_reports_from_checklist,
 )
+from .round_formula_ops import round_selected_range_to_two_decimals
 from .sheet_ops import generate_sheet_index_sheet_with_links
 from .table_ops import (
     merge_workbook_sheets_to_new_sheet,
@@ -131,6 +132,7 @@ class ExcelToolkitApp:
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
                 ("数据穿透取数", "btn_data_drill", self.run_data_drill),
                 ("按清单生成报表", "btn_report_generate", self.run_report_generate),
+                ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
             ],
         )
 
@@ -1153,6 +1155,44 @@ class ExcelToolkitApp:
             )
         finally:
             self.btn_report_generate.config(state="normal")
+
+    def run_round_formula(self):
+        """按钮回调函数，将当前 Excel 选区内数值/公式直接包裹 ROUND(...,2)"""
+        self._log_info("选区 ROUND 保留两位：开始操作。")
+        self.btn_round_formula.config(state="disabled")
+        try:
+            result = round_selected_range_to_two_decimals(logger=self._flushing_logger())
+            self._log_info(
+                "选区 ROUND 保留两位完成："
+                f"工作簿 {result['workbook_name']}；"
+                f"Sheet {result['sheet_name']}；"
+                f"选区 {result['selection_address']}；"
+                f"成功 {result['success_count']} 个；"
+                f"跳过 {result['skipped_count']} 个。"
+            )
+            self._log_info("当前工作簿未自动保存，请检查后自行保存。")
+            self._show_info_no_grab(
+                "选区 ROUND 保留两位",
+                "处理完成。\n"
+                f"当前工作簿名：{result['workbook_name']}\n"
+                f"当前 sheet 名：{result['sheet_name']}\n"
+                f"当前选区地址：{result['selection_address']}\n"
+                f"成功处理数量：{result['success_count']}\n"
+                f"跳过数量：{result['skipped_count']}\n\n"
+                "当前工作簿未自动保存，请检查后自行保存。",
+                dialog_width=520,
+                wraplength=460,
+            )
+        except Exception as e:
+            self._log_error(f"选区 ROUND 保留两位失败：{type(e).__name__}: {e}")
+            self._show_info_no_grab(
+                "选区 ROUND 保留两位",
+                f"选区 ROUND 保留两位失败：{e}",
+                dialog_width=520,
+                wraplength=460,
+            )
+        finally:
+            self.btn_round_formula.config(state="normal")
 
     def _confirm_data_drill_context(self, context):
         choice = self._ask_choice_no_grab(
