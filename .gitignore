@@ -15,6 +15,7 @@ env/
 # Build artifacts
 build/
 dist/
+*.spec
 *.egg-info/
 
 # IDE / local settings

@@ -41,6 +41,15 @@ python run_app.py
 python -m src.excel_efficiency_toolkit.app
 ```
 
+## 打包 Windows exe
+项目提供 PyInstaller 打包脚本，默认入口为 `run_app.py`，输出到 `dist/Excel效率工具台.exe`。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
+```
+
+脚本会先检查 PyInstaller；如未安装会尝试通过 `python -m pip install pyinstaller` 安装。`build/`、`dist/` 和自动生成的 `.spec` 文件默认不纳入版本控制。
+
 ## 运行测试
 本项目包含了不依赖真实 Excel 的单元测试（采用 Mock 机制）。
 ```bash
