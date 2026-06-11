@@ -24,6 +24,12 @@ pip install -r requirements.txt
 
 ## 运行方式
 ```bash
+python run_app.py
+```
+
+也可以使用模块方式运行：
+
+```bash
 python -m src.excel_efficiency_toolkit.app
 ```
 

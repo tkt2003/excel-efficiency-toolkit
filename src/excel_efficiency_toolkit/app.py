@@ -93,6 +93,33 @@ class ExcelToolkitApp:
         self.logger = setup_logger(self.log_text)
         self.logger.info("欢迎使用 Excel 效率工具台。程序已就绪。")
 
+    def _center_window(self, window, width=None, height=None):
+        window.update_idletasks()
+        width = width or window.winfo_reqwidth()
+        height = height or window.winfo_reqheight()
+
+        try:
+            parent_x = self.root.winfo_rootx()
+            parent_y = self.root.winfo_rooty()
+            parent_w = self.root.winfo_width()
+            parent_h = self.root.winfo_height()
+        except tk.TclError:
+            parent_w = 0
+            parent_h = 0
+
+        if parent_w > 1 and parent_h > 1:
+            x = parent_x + (parent_w - width) // 2
+            y = parent_y + (parent_h - height) // 2
+        else:
+            screen_width = window.winfo_screenwidth()
+            screen_height = window.winfo_screenheight()
+            x = int((screen_width - width) / 2)
+            y = int((screen_height - height) / 2)
+
+        x = max(0, x)
+        y = max(0, y)
+        window.geometry(f"{width}x{height}+{x}+{y}")
+
     def run_export_sheets(self):
         """按钮回调函数，将一个工作簿按工作表拆分为多个文件"""
         source_path = filedialog.askopenfilename(
@@ -318,6 +345,7 @@ class ExcelToolkitApp:
     def _confirm_delete_rule_ready(self, rule_table_path):
         result = {"execute": False}
         dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
         dialog.title("批量删除工作表")
         dialog.resizable(False, False)
         dialog.transient(self.root)
@@ -384,18 +412,16 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.update_idletasks()
-        self.root.update_idletasks()
-        root_x = self.root.winfo_rootx()
-        root_y = self.root.winfo_rooty()
-        root_width = self.root.winfo_width()
-        root_height = self.root.winfo_height()
-        dialog_width = dialog.winfo_width()
-        dialog_height = dialog.winfo_height()
-        x = root_x + max((root_width - dialog_width) // 2, 0)
-        y = root_y + max((root_height - dialog_height) // 2, 0)
-        dialog.geometry(f"+{x}+{y}")
+        width = max(dialog.winfo_reqwidth(), 430)
+        height = max(dialog.winfo_reqheight(), 160)
+        self._center_window(dialog, width=width, height=height)
+        dialog.deiconify()
         dialog.lift()
         dialog.focus_force()
+        dialog.after(
+            50,
+            lambda: dialog.winfo_exists() and self._center_window(dialog, width=width, height=height),
+        )
         self.root.wait_window(dialog)
         return result["execute"]
 
