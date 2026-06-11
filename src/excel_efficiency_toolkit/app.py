@@ -10,6 +10,14 @@ from .delete_sheet_ops import (
 )
 from .export_ops import export_workbook_sheets_to_files
 from .logging_utils import setup_logger
+from .rename_file_ops import (
+    build_rename_plan,
+    create_rename_rule_workbook,
+    execute_rename_plan,
+    read_rename_rules,
+    read_rename_settings,
+    write_rename_results_to_workbook,
+)
 from .sheet_ops import generate_sheet_index_sheet_with_links
 from .table_ops import (
     merge_workbook_sheets_to_new_sheet,
@@ -106,6 +114,7 @@ class ExcelToolkitApp:
             "批量维护",
             [
                 ("批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
+                ("批量重命名文件", "btn_rename_files", self.run_batch_rename_files),
             ],
         )
 
@@ -597,6 +606,40 @@ class ExcelToolkitApp:
         finally:
             self.btn_delete_sheets.config(state="normal")
 
+    def run_batch_rename_files(self):
+        """按钮回调函数，生成临时规则表后确认执行批量重命名文件"""
+        self.logger.info("批量重命名文件：开始操作。")
+        source_paths = filedialog.askopenfilenames(
+            title="请选择需要批量重命名的文件",
+            filetypes=[("所有文件", "*.*")],
+        )
+        if not source_paths:
+            self.logger.info("用户已取消操作")
+            return
+
+        self.btn_rename_files.config(state="disabled")
+        try:
+            self.logger.info(f"已选择文件数量：{len(source_paths)}")
+            rule_path = create_rename_rule_workbook(list(source_paths))
+            self.logger.info(f"已生成重命名规则表：{rule_path}")
+            try:
+                os.startfile(rule_path)
+                self.logger.info("规则表已打开，请填写 C/D 列，保存并关闭规则表后点击执行。")
+            except Exception as open_error:
+                self.logger.error(f"规则表已生成，但自动打开失败：{open_error}")
+                self.logger.info(f"请手动打开规则表：{rule_path}")
+
+            if not self._confirm_rename_rule_ready(rule_path):
+                self.logger.info("用户已取消操作")
+        except Exception as e:
+            self.logger.error(f"批量重命名文件失败：{e}")
+            self._show_info_no_grab(
+                "批量重命名文件",
+                f"批量重命名文件失败：{e}",
+            )
+        finally:
+            self.btn_rename_files.config(state="normal")
+
     def run_color_sum(self):
         """按钮回调函数，按当前选中单元格填充色汇总指定 sheet 的同地址单元格"""
         self._log_info("按颜色汇总求和：开始操作。")
@@ -815,6 +858,141 @@ class ExcelToolkitApp:
             return None
 
         return mode
+
+    def _confirm_rename_rule_ready(self, rule_workbook_path):
+        result = {"execute": False}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("批量重命名文件")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=(
+                "规则表已打开。\n"
+                "请在【重命名清单】中填写新文件名和后缀名，\n"
+                "保存并关闭/释放规则表后，再点击执行。"
+            ),
+            font=("Microsoft YaHei", 11),
+            wraplength=400,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+
+        def execute():
+            execute_button.config(state="disabled")
+            try:
+                self.logger.info(f"正在读取重命名规则表：{rule_workbook_path}")
+                try:
+                    write_rename_results_to_workbook(rule_workbook_path, [])
+                except PermissionError:
+                    self._show_rule_workbook_busy_message()
+                    return
+                except OSError as e:
+                    self.logger.error(f"规则表无法回写：{e}")
+                    self._show_rule_workbook_busy_message()
+                    return
+
+                settings = read_rename_settings(rule_workbook_path)
+                for warning in settings.warnings or []:
+                    self.logger.info(warning)
+
+                rules = read_rename_rules(rule_workbook_path)
+                actions = build_rename_plan(rules, settings)
+                valid_actions = [action for action in actions if action.status == "成功"]
+                skipped_actions = [action for action in actions if action.status == "跳过"]
+                self.logger.info(f"规则行数：{len(rules)}")
+                self.logger.info(f"有效重命名任务：{len(valid_actions)}")
+                self.logger.info(f"跳过任务：{len(skipped_actions)}")
+
+                for index, action in enumerate(valid_actions, start=1):
+                    self.logger.info(
+                        f"正在重命名 {index}/{len(valid_actions)}："
+                        f"{os.path.basename(action.original_path)} -> {action.final_name}"
+                    )
+
+                summary = execute_rename_plan(actions)
+                try:
+                    write_rename_results_to_workbook(rule_workbook_path, actions)
+                    self.logger.info(f"规则表已更新：{rule_workbook_path}")
+                    result_message = (
+                        "重命名完成。\n"
+                        f"成功：{summary['success_count']} 个\n"
+                        f"跳过：{summary['skipped_count']} 个\n"
+                        f"失败：{summary['failed_count']} 个\n\n"
+                        "规则表已更新状态/备注，请查看确认。"
+                    )
+                except PermissionError:
+                    self.logger.error("规则表被占用，无法回写状态、说明和处理日志。")
+                    result_message = (
+                        "重命名已执行，但规则表无法回写。\n"
+                        "请确认规则表已保存并关闭后，再查看文件结果。"
+                    )
+                except OSError as e:
+                    self.logger.error(f"规则表无法回写：{e}")
+                    result_message = (
+                        "重命名已执行，但规则表无法回写。\n"
+                        f"原因：{e}"
+                    )
+
+                self.logger.info(
+                    "批量重命名完成："
+                    f"成功 {summary['success_count']} 个；"
+                    f"跳过 {summary['skipped_count']} 个；"
+                    f"失败 {summary['failed_count']} 个。"
+                )
+                self._show_info_no_grab("批量重命名文件", result_message)
+                result["execute"] = True
+                done.set(True)
+                dialog.destroy()
+            except Exception as e:
+                self.logger.error(f"批量重命名文件失败：{e}")
+                self._show_info_no_grab(
+                    "批量重命名文件",
+                    f"批量重命名文件失败：{e}",
+                )
+            finally:
+                if dialog.winfo_exists():
+                    execute_button.config(state="normal")
+
+        def cancel():
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT)
+        execute_button = tk.Button(
+            button_frame,
+            text="我已填好规则，执行批量重命名",
+            command=execute,
+            font=("Microsoft YaHei", 10),
+            width=28,
+        )
+        execute_button.pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        self._show_dialog_no_grab(dialog, min_width=460, min_height=170)
+        self.root.wait_variable(done)
+        return result["execute"]
+
+    def _show_rule_workbook_busy_message(self):
+        self.logger.error("规则表仍被 Excel 占用，无法继续执行。请保存并关闭规则表后重试。")
+        self._show_info_no_grab(
+            "批量重命名文件",
+            "规则表仍被 Excel 占用，无法回写。\n"
+            "请先保存并关闭规则表，再点击执行批量重命名。",
+        )
 
 
 class _FlushingLogger:
