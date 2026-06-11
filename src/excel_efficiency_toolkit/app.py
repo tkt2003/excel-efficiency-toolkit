@@ -1,7 +1,13 @@
 import os
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, simpledialog
-from .delete_sheet_ops import generate_delete_sheet_rule_table
+from .delete_sheet_ops import (
+    execute_batch_delete_sheets_in_place,
+    generate_temporary_delete_sheet_rule_table,
+    infer_delete_mode_from_rule_values,
+    normalize_delete_mode,
+    read_rule_values_from_rule_table,
+)
 from .export_ops import export_workbook_sheets_to_files
 from .logging_utils import setup_logger
 from .sheet_ops import generate_sheet_index_sheet_with_links
@@ -273,9 +279,9 @@ class ExcelToolkitApp:
             self.btn_sheet_index.config(state="normal")
 
     def run_delete_sheets(self):
-        """按钮回调函数，第一阶段仅生成批量删除规则表"""
+        """按钮回调函数，生成临时规则表后确认执行批量删除"""
         source_paths = filedialog.askopenfilenames(
-            title="请选择要扫描的 Excel 文件",
+            title="请选择要批量删除工作表的 Excel 文件",
             filetypes=[
                 ("Excel 文件", "*.xlsx *.xlsm *.xls"),
                 ("所有文件", "*.*"),
@@ -285,40 +291,134 @@ class ExcelToolkitApp:
             self.logger.info("用户已取消操作")
             return
 
-        output_path = filedialog.asksaveasfilename(
-            title="请选择规则表保存位置",
-            defaultextension=".xlsx",
-            initialfile="批量删除工作表_规则表.xlsx",
-            filetypes=[
-                ("Excel 文件", "*.xlsx"),
-                ("所有文件", "*.*"),
-            ],
-        )
-        if not output_path:
-            self.logger.info("用户已取消操作")
-            return
-
         self.btn_delete_sheets.config(state="disabled")
         try:
-            result = generate_delete_sheet_rule_table(
+            result = generate_temporary_delete_sheet_rule_table(
                 source_paths=list(source_paths),
-                output_path=output_path,
                 logger=self.logger,
             )
             self.logger.info(f"选择文件数量：{result['source_file_count']}")
             self.logger.info(f"读取成功文件数：{result['read_success_count']}")
             self.logger.info(f"唯一表格名数量：{result['unique_sheet_count']}")
-            self.logger.info(f"规则表保存路径：{result['output_path']}")
-            self.logger.info("本阶段仅生成规则表，未执行任何删除操作。")
+            self.logger.info(f"临时规则表路径：{result['output_path']}")
             try:
                 os.startfile(result["output_path"])
-                self.logger.info("规则表已自动打开，请填写 B/C/D 列。")
+                self.logger.info("规则表已自动打开。请填写并保存规则表后，再点击弹窗中的执行按钮。")
             except Exception as open_error:
                 self.logger.error(f"规则表已生成，但自动打开失败：{open_error}")
+
+            if not self._confirm_delete_rule_ready(result["output_path"]):
+                self.logger.info("用户已取消操作")
+                return
         except Exception as e:
-            self.logger.error(f"生成批量删除规则表失败：{e}")
+            self.logger.error(f"批量删除工作表失败：{e}")
         finally:
             self.btn_delete_sheets.config(state="normal")
+
+    def _confirm_delete_rule_ready(self, rule_table_path):
+        result = {"execute": False}
+        dialog = tk.Toplevel(self.root)
+        dialog.title("批量删除工作表")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        try:
+            dialog.attributes("-toolwindow", True)
+        except tk.TclError:
+            pass
+
+        tk.Label(
+            dialog,
+            text="规则表已打开。请在 B/C/D 列填写规则并保存规则表后，再点击执行。",
+            font=("Microsoft YaHei", 11),
+            wraplength=460,
+            justify="left",
+            padx=20,
+            pady=16,
+        ).pack()
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=20, pady=(0, 16), fill=tk.X)
+
+        def execute():
+            execute_button.config(state="disabled")
+            try:
+                mode = self._resolve_delete_mode_from_rule_table(rule_table_path)
+                if mode is None:
+                    return
+
+                execute_result = execute_batch_delete_sheets_in_place(
+                    rule_table_path=rule_table_path,
+                    mode=mode,
+                    logger=self.logger,
+                )
+                self.logger.info(f"有效源文件数：{execute_result['source_file_count']}")
+                self.logger.info(f"成功处理文件数：{execute_result['processed_file_count']}")
+                self.logger.info(f"跳过文件数：{execute_result['skipped_file_count']}")
+                self.logger.info(f"失败文件数：{execute_result['failed_file_count']}")
+                self.logger.info(f"删除工作表总数：{execute_result['deleted_sheet_count']}")
+                self.logger.info(f"实际模式：{execute_result['mode']}")
+                result["execute"] = True
+                dialog.destroy()
+            except Exception as e:
+                self.logger.error(f"批量删除工作表失败：{e}")
+            finally:
+                if dialog.winfo_exists():
+                    execute_button.config(state="normal")
+
+        def cancel():
+            dialog.destroy()
+
+        execute_button = tk.Button(
+            button_frame,
+            text="我已填好规则，执行批量删除",
+            command=execute,
+            font=("Microsoft YaHei", 10),
+        )
+        execute_button.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Button(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+        ).pack(side=tk.RIGHT)
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.update_idletasks()
+        self.root.update_idletasks()
+        root_x = self.root.winfo_rootx()
+        root_y = self.root.winfo_rooty()
+        root_width = self.root.winfo_width()
+        root_height = self.root.winfo_height()
+        dialog_width = dialog.winfo_width()
+        dialog_height = dialog.winfo_height()
+        x = root_x + max((root_width - dialog_width) // 2, 0)
+        y = root_y + max((root_height - dialog_height) // 2, 0)
+        dialog.geometry(f"+{x}+{y}")
+        dialog.lift()
+        dialog.focus_force()
+        self.root.wait_window(dialog)
+        return result["execute"]
+
+    def _resolve_delete_mode_from_rule_table(self, rule_table_path):
+        rule_values = read_rule_values_from_rule_table(rule_table_path)
+        inferred_mode = infer_delete_mode_from_rule_values(rule_values)
+        if inferred_mode is not None:
+            return inferred_mode
+
+        mode_input = simpledialog.askstring(
+            "批量删除工作表",
+            "B列和C列都填写了规则，请选择执行模式：\n1 保留模式：只保留 B 列表格名，删除其他表格\n2 删除模式：删除 C 列表格名",
+            parent=self.root,
+        )
+        if mode_input is None:
+            self.logger.info("用户已取消操作")
+            return None
+
+        try:
+            return normalize_delete_mode(mode_input)
+        except ValueError as e:
+            self.logger.error(f"输入无效：{e}")
+            return None
 
 def main():
     root = tk.Tk()
