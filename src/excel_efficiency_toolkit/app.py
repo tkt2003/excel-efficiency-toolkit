@@ -39,6 +39,7 @@ from .table_ops import (
     split_workbook_sheet_by_column,
     validate_row_numbers,
 )
+from .workbook_merge_ops import merge_workbooks_to_existing_workbook
 
 class ExcelToolkitApp:
     def __init__(self, root):
@@ -76,7 +77,7 @@ class ExcelToolkitApp:
         ).pack(anchor="w")
         tk.Label(
             header,
-            text="请选择需要执行的功能。默认不自动保存目标文件，请检查后自行保存。",
+            text="请选择需要执行的功能。多数功能不自动保存；会保存目标文件的功能会在执行前提示。",
             font=("Microsoft YaHei", 10),
             fg="#5f6b7a",
             bg=self.bg_color,
@@ -106,6 +107,7 @@ class ExcelToolkitApp:
             "合并整理",
             [
                 ("多表合并到一个新表", "btn_merge_sheets", self.run_merge_sheets),
+                ("多簿到一簿", "btn_merge_workbooks", self.run_merge_workbooks),
             ],
         )
         self._create_feature_group(
@@ -494,6 +496,115 @@ class ExcelToolkitApp:
             self.logger.error(f"多表合并失败：{e}")
         finally:
             self.btn_merge_sheets.config(state="normal")
+
+    def run_merge_workbooks(self):
+        """按钮回调函数，将多个源工作簿中的指定工作表导入到一个已有目标工作簿"""
+        self._log_info("多簿到一簿：开始操作。")
+        source_paths = filedialog.askopenfilenames(
+            title="请选择源 Excel 文件",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_paths:
+            self._log_info("用户已取消操作。")
+            return
+
+        target_path = filedialog.askopenfilename(
+            title="请选择已有目标 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not target_path:
+            self._log_info("用户已取消操作。")
+            return
+
+        requested_sheet_name = self._ask_text_no_grab(
+            "多簿到一簿",
+            "请输入源 sheet 名；留空则导入每个源文件的第一个可见 sheet。",
+            entry_width=28,
+            dialog_width=440,
+            wraplength=380,
+        )
+        if requested_sheet_name is None:
+            self._log_info("用户已取消操作。")
+            return
+
+        values_only = self._ask_choice_no_grab(
+            "多簿到一簿",
+            "请选择复制方式：\n默认建议选择“否，保留公式和基础格式”。",
+            [
+                ("否，保留公式和基础格式", False),
+                ("是，只复制值", True),
+            ],
+            dialog_width=500,
+            wraplength=440,
+        )
+        if values_only is None:
+            self._log_info("用户已取消操作。")
+            return
+
+        confirmed = self._ask_choice_no_grab(
+            "多簿到一簿",
+            (
+                "执行前请确认：\n"
+                "目标工作簿会被修改并保存；\n"
+                "请先关闭目标工作簿；\n"
+                "程序会自动生成备份；\n"
+                "源文件不会被修改。"
+            ),
+            [
+                ("我已关闭目标，继续", True),
+            ],
+            dialog_width=500,
+            wraplength=440,
+        )
+        if confirmed is not True:
+            self._log_info("用户已取消操作。")
+            return
+
+        self.btn_merge_workbooks.config(state="disabled")
+        try:
+            self._log_info(f"源文件数量：{len(source_paths)}")
+            self._log_info(f"目标工作簿：{target_path}")
+            result = merge_workbooks_to_existing_workbook(
+                source_paths=list(source_paths),
+                target_path=target_path,
+                requested_sheet_name=requested_sheet_name,
+                values_only=values_only,
+                logger=self._flushing_logger(),
+            )
+            self._log_info(
+                "多簿到一簿完成："
+                f"成功 {result['success_count']} 个；"
+                f"跳过 {result['skipped_count']} 个；"
+                f"失败 {result['failed_count']} 个。"
+            )
+            self._show_info_no_grab(
+                "多簿到一簿",
+                "导入完成。\n"
+                f"成功导入数量：{result['success_count']}\n"
+                f"跳过数量：{result['skipped_count']}\n"
+                f"失败数量：{result['failed_count']}\n"
+                f"备份路径：{result['backup_path']}\n"
+                f"目标工作簿路径：{result['target_path']}\n\n"
+                "已生成多簿汇总目录和多簿汇总日志。",
+                dialog_width=620,
+                wraplength=560,
+            )
+        except Exception as e:
+            self._log_error(f"多簿到一簿失败：{e}")
+            self._show_info_no_grab(
+                "多簿到一簿",
+                f"多簿到一簿失败：{e}",
+                dialog_width=560,
+                wraplength=500,
+            )
+        finally:
+            self.btn_merge_workbooks.config(state="normal")
 
     def run_split_sheet(self):
         """按钮回调函数，按指定列拆分所选工作簿中的指定工作表"""
