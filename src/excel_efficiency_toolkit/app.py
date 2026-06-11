@@ -1,11 +1,11 @@
 import os
 import tkinter as tk
-from tkinter import filedialog, scrolledtext, simpledialog
+from tkinter import filedialog, scrolledtext
+from .color_sum_ops import sum_current_sheet_by_fill_color
 from .delete_sheet_ops import (
     execute_batch_delete_sheets_in_place,
     generate_temporary_delete_sheet_rule_table,
     infer_delete_mode_from_rule_values,
-    normalize_delete_mode,
     read_rule_values_from_rule_table,
 )
 from .export_ops import export_workbook_sheets_to_files
@@ -73,6 +73,15 @@ class ExcelToolkitApp:
         )
         self.btn_delete_sheets.pack(pady=(10, 0))
 
+        self.btn_color_sum = tk.Button(
+            self.frame_top,
+            text="按颜色汇总求和",
+            font=("Microsoft YaHei", 12),
+            command=self.run_color_sum,
+            bg="#f0f0f0"
+        )
+        self.btn_color_sum.pack(pady=(10, 0))
+
         # 底部日志区域
         self.frame_bottom = tk.Frame(root)
         self.frame_bottom.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
@@ -120,6 +129,178 @@ class ExcelToolkitApp:
         y = max(0, y)
         window.geometry(f"{width}x{height}+{x}+{y}")
 
+    def _flush_ui(self):
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except tk.TclError:
+            pass
+
+    def _log_info(self, message):
+        self.logger.info(message)
+        self._flush_ui()
+
+    def _log_error(self, message):
+        self.logger.error(message)
+        self._flush_ui()
+
+    def _flushing_logger(self):
+        return _FlushingLogger(self.logger, self._flush_ui)
+
+    def _show_dialog_no_grab(self, dialog, focus_widget=None, min_width=380, min_height=None):
+        dialog.update_idletasks()
+        width = max(dialog.winfo_reqwidth(), min_width)
+        height = max(dialog.winfo_reqheight(), min_height) if min_height else None
+        self._center_window(dialog, width=width, height=height)
+        dialog.deiconify()
+        dialog.lift()
+        try:
+            dialog.attributes("-topmost", True)
+            dialog.after(200, lambda: dialog.winfo_exists() and dialog.attributes("-topmost", False))
+        except tk.TclError:
+            pass
+        try:
+            dialog.focus_force()
+        except tk.TclError:
+            pass
+        if focus_widget is not None:
+            try:
+                focus_widget.focus_set()
+            except tk.TclError:
+                pass
+
+    def _ask_text_no_grab(self, title, prompt, default="", entry_width=30, dialog_width=380, wraplength=340):
+        result = {"value": None}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=prompt,
+            font=("Microsoft YaHei", 11),
+            wraplength=wraplength,
+            justify="left",
+            padx=16,
+            pady=8,
+        ).pack(anchor="w")
+
+        entry = tk.Entry(dialog, font=("Microsoft YaHei", 11), width=entry_width)
+        entry.pack(padx=16, pady=(0, 12), fill=tk.X)
+        entry.insert(0, default)
+        entry.select_range(0, tk.END)
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+
+        def confirm():
+            result["value"] = entry.get()
+            done.set(True)
+            dialog.destroy()
+
+        def cancel():
+            result["value"] = None
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(button_frame, text="取消", command=cancel, font=("Microsoft YaHei", 10), width=10).pack(
+            side=tk.RIGHT,
+        )
+        tk.Button(button_frame, text="确定", command=confirm, font=("Microsoft YaHei", 10), width=10).pack(
+            side=tk.RIGHT,
+            padx=(0, 8),
+        )
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.bind("<Return>", lambda event: confirm())
+        dialog.bind("<Escape>", lambda event: cancel())
+        self._show_dialog_no_grab(dialog, focus_widget=entry, min_width=dialog_width)
+        self.root.wait_variable(done)
+        return result["value"]
+
+    def _ask_choice_no_grab(self, title, prompt, choices, dialog_width=420, wraplength=360):
+        result = {"value": None}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=prompt,
+            font=("Microsoft YaHei", 11),
+            wraplength=wraplength,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+
+        def choose(value):
+            result["value"] = value
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(
+            button_frame,
+            text="取消",
+            command=lambda: choose(None),
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT)
+
+        for label, value in reversed(choices):
+            tk.Button(
+                button_frame,
+                text=label,
+                command=lambda selected=value: choose(selected),
+                font=("Microsoft YaHei", 10),
+                width=14,
+            ).pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: choose(None))
+        dialog.bind("<Escape>", lambda event: choose(None))
+        self._show_dialog_no_grab(dialog, min_width=dialog_width)
+        self.root.wait_variable(done)
+        return result["value"]
+
+    def _show_info_no_grab(self, title, message, dialog_width=400, wraplength=360):
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=message,
+            font=("Microsoft YaHei", 11),
+            wraplength=wraplength,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        tk.Button(
+            button_frame,
+            text="确定",
+            command=dialog.destroy,
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT)
+
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        self._show_dialog_no_grab(dialog, min_width=dialog_width)
+
     def run_export_sheets(self):
         """按钮回调函数，将一个工作簿按工作表拆分为多个文件"""
         source_path = filedialog.askopenfilename(
@@ -150,7 +331,7 @@ class ExcelToolkitApp:
             self.btn_export_sheets.config(state="normal")
 
     def _ask_positive_int(self, title, prompt, initialvalue):
-        value = simpledialog.askstring(title, prompt, initialvalue=str(initialvalue), parent=self.root)
+        value = self._ask_text_no_grab(title, prompt, default=str(initialvalue))
         if value is None:
             return None
         try:
@@ -171,11 +352,10 @@ class ExcelToolkitApp:
             self.logger.info("用户已取消操作")
             return
 
-        result_sheet_name = simpledialog.askstring(
+        result_sheet_name = self._ask_text_no_grab(
             "多表合并",
             "结果 sheet 名：",
-            initialvalue="合并结果",
-            parent=self.root,
+            default="合并结果",
         )
         if result_sheet_name is None:
             self.logger.info("用户已取消操作")
@@ -227,19 +407,17 @@ class ExcelToolkitApp:
             self.logger.info("用户已取消操作")
             return
 
-        source_sheet_name = simpledialog.askstring(
+        source_sheet_name = self._ask_text_no_grab(
             "按列拆分",
             "源 sheet 名（只有一个 sheet 时可留空）：",
-            parent=self.root,
         )
         if source_sheet_name is None:
             self.logger.info("用户已取消操作")
             return
 
-        column_input = simpledialog.askstring(
+        column_input = self._ask_text_no_grab(
             "按列拆分",
             "拆分列，例如 A、B、C 或 1、2、3：",
-            parent=self.root,
         )
         if column_input is None:
             self.logger.info("用户已取消操作")
@@ -342,30 +520,95 @@ class ExcelToolkitApp:
         finally:
             self.btn_delete_sheets.config(state="normal")
 
+    def run_color_sum(self):
+        """按钮回调函数，按当前选中单元格填充色汇总指定 sheet 的同地址单元格"""
+        self._log_info("按颜色汇总求和：开始操作。")
+        try:
+            target_sheet_name = self._ask_text_no_grab(
+                "按颜色汇总求和",
+                "请输入要汇总的 sheet 名；留空则使用当前活动 sheet。",
+                entry_width=26,
+                dialog_width=360,
+                wraplength=320,
+            )
+            if target_sheet_name is None:
+                self._log_info("用户已取消操作。")
+                return
+
+            source_paths = filedialog.askopenfilenames(
+                title="请选择源 Excel 文件",
+                filetypes=[
+                    ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                    ("所有文件", "*.*"),
+                ],
+            )
+            if not source_paths:
+                self._log_info("用户已取消操作。")
+                return
+
+            write_mode = self._ask_choice_no_grab(
+                "按颜色汇总求和",
+                "请选择写入方式：\n1 写入求和公式\n2 只写入汇总数值",
+                [
+                    ("写入求和公式", "formula"),
+                    ("只写入汇总数值", "value"),
+                ],
+            )
+            if write_mode is None:
+                self._log_info("用户已取消操作。")
+                return
+
+            self.btn_color_sum.config(state="disabled")
+            result = sum_current_sheet_by_fill_color(
+                source_paths=list(source_paths),
+                write_mode=write_mode,
+                target_sheet_name=target_sheet_name,
+                logger=self._flushing_logger(),
+            )
+            self._log_info(
+                "按颜色汇总求和完成："
+                f"写入 {result['written_cell_count']} 个单元格；"
+                f"找到同名工作表源文件 {result['matched_source_file_count']} 个；"
+                f"缺少同名工作表 {result['missing_sheet_file_count']} 个；"
+                f"忽略非数字 {result['ignored_non_numeric_count']} 个。"
+            )
+            self._log_info("目标工作簿未自动保存，请检查后自行保存。")
+            self._show_info_no_grab(
+                "按颜色汇总求和",
+                "汇总完成。\n"
+                f"目标工作表：{result['target_sheet_name']}\n"
+                f"写入单元格：{result['written_cell_count']}\n"
+                f"参与源文件：{result['matched_source_file_count']}\n"
+                f"缺少同名工作表：{result['missing_sheet_file_count']}\n"
+                f"忽略非数字：{result['ignored_non_numeric_count']}\n\n"
+                "目标工作簿未自动保存，请检查后自行保存。",
+            )
+        except Exception as e:
+            self._log_error(f"按颜色汇总求和失败：{type(e).__name__}: {e}")
+        finally:
+            self.btn_color_sum.config(state="normal")
+
     def _confirm_delete_rule_ready(self, rule_table_path):
         result = {"execute": False}
+        done = tk.BooleanVar(value=False)
         dialog = tk.Toplevel(self.root)
         dialog.withdraw()
         dialog.title("批量删除工作表")
         dialog.resizable(False, False)
         dialog.transient(self.root)
-        try:
-            dialog.attributes("-toolwindow", True)
-        except tk.TclError:
-            pass
 
         tk.Label(
             dialog,
             text="规则表已打开。请在 B/C/D 列填写规则并保存规则表后，再点击执行。",
             font=("Microsoft YaHei", 11),
-            wraplength=460,
+            wraplength=360,
             justify="left",
-            padx=20,
-            pady=16,
+            padx=16,
+            pady=12,
         ).pack()
 
         button_frame = tk.Frame(dialog)
-        button_frame.pack(padx=20, pady=(0, 16), fill=tk.X)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
 
         def execute():
             execute_button.config(state="disabled")
@@ -386,6 +629,7 @@ class ExcelToolkitApp:
                 self.logger.info(f"删除工作表总数：{execute_result['deleted_sheet_count']}")
                 self.logger.info(f"实际模式：{execute_result['mode']}")
                 result["execute"] = True
+                done.set(True)
                 dialog.destroy()
             except Exception as e:
                 self.logger.error(f"批量删除工作表失败：{e}")
@@ -394,35 +638,28 @@ class ExcelToolkitApp:
                     execute_button.config(state="normal")
 
         def cancel():
+            done.set(True)
             dialog.destroy()
 
-        execute_button = tk.Button(
-            button_frame,
-            text="我已填好规则，执行批量删除",
-            command=execute,
-            font=("Microsoft YaHei", 10),
-        )
-        execute_button.pack(side=tk.LEFT, padx=(0, 10))
         tk.Button(
             button_frame,
             text="取消",
             command=cancel,
             font=("Microsoft YaHei", 10),
+            width=10,
         ).pack(side=tk.RIGHT)
+        execute_button = tk.Button(
+            button_frame,
+            text="我已填好规则，执行批量删除",
+            command=execute,
+            font=("Microsoft YaHei", 10),
+            width=22,
+        )
+        execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        dialog.update_idletasks()
-        width = max(dialog.winfo_reqwidth(), 430)
-        height = max(dialog.winfo_reqheight(), 160)
-        self._center_window(dialog, width=width, height=height)
-        dialog.deiconify()
-        dialog.lift()
-        dialog.focus_force()
-        dialog.after(
-            50,
-            lambda: dialog.winfo_exists() and self._center_window(dialog, width=width, height=height),
-        )
-        self.root.wait_window(dialog)
+        self._show_dialog_no_grab(dialog, min_width=400, min_height=160)
+        self.root.wait_variable(done)
         return result["execute"]
 
     def _resolve_delete_mode_from_rule_table(self, rule_table_path):
@@ -431,20 +668,36 @@ class ExcelToolkitApp:
         if inferred_mode is not None:
             return inferred_mode
 
-        mode_input = simpledialog.askstring(
+        mode = self._ask_choice_no_grab(
             "批量删除工作表",
             "B列和C列都填写了规则，请选择执行模式：\n1 保留模式：只保留 B 列表格名，删除其他表格\n2 删除模式：删除 C 列表格名",
-            parent=self.root,
+            [
+                ("保留模式", "keep"),
+                ("删除模式", "delete"),
+            ],
         )
-        if mode_input is None:
+        if mode is None:
             self.logger.info("用户已取消操作")
             return None
 
-        try:
-            return normalize_delete_mode(mode_input)
-        except ValueError as e:
-            self.logger.error(f"输入无效：{e}")
-            return None
+        return mode
+
+
+class _FlushingLogger:
+    def __init__(self, logger, flush):
+        self._logger = logger
+        self._flush = flush
+
+    def info(self, message):
+        self._logger.info(message)
+        self._flush()
+
+    def error(self, message):
+        self._logger.error(message)
+        self._flush()
+
+    def __getattr__(self, name):
+        return getattr(self._logger, name)
 
 def main():
     root = tk.Tk()
