@@ -22,85 +22,162 @@ class ExcelToolkitApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Excel 效率工具台")
-        self.root.geometry("760x620")
+        self.root.geometry("860x680")
+        self.root.minsize(780, 620)
+        self.bg_color = "#f5f6f8"
+        self.card_color = "#ffffff"
+        self.border_color = "#d7dce2"
+        self.text_color = "#1f2937"
+        self.root.configure(bg=self.bg_color)
 
-        # 顶部按钮区域
-        self.frame_top = tk.Frame(root)
-        self.frame_top.pack(pady=20, fill=tk.X)
+        self.main_frame = tk.Frame(root, bg=self.bg_color)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
 
-        self.btn_export_sheets = tk.Button(
-            self.frame_top,
-            text="一簿按工作表拆分为多个文件",
-            font=("Microsoft YaHei", 12),
-            command=self.run_export_sheets,
-            bg="#f0f0f0"
-        )
-        self.btn_export_sheets.pack(pady=(10, 0))
-
-        self.btn_merge_sheets = tk.Button(
-            self.frame_top,
-            text="多表合并到一个新表",
-            font=("Microsoft YaHei", 12),
-            command=self.run_merge_sheets,
-            bg="#f0f0f0"
-        )
-        self.btn_merge_sheets.pack(pady=(10, 0))
-
-        self.btn_split_sheet = tk.Button(
-            self.frame_top,
-            text="按指定列拆分工作表",
-            font=("Microsoft YaHei", 12),
-            command=self.run_split_sheet,
-            bg="#f0f0f0"
-        )
-        self.btn_split_sheet.pack(pady=(10, 0))
-
-        self.btn_sheet_index = tk.Button(
-            self.frame_top,
-            text="生成带链接的工作表目录",
-            font=("Microsoft YaHei", 12),
-            command=self.run_sheet_index,
-            bg="#f0f0f0"
-        )
-        self.btn_sheet_index.pack(pady=(10, 0))
-
-        self.btn_delete_sheets = tk.Button(
-            self.frame_top,
-            text="批量删除工作表",
-            font=("Microsoft YaHei", 12),
-            command=self.run_delete_sheets,
-            bg="#f0f0f0"
-        )
-        self.btn_delete_sheets.pack(pady=(10, 0))
-
-        self.btn_color_sum = tk.Button(
-            self.frame_top,
-            text="按颜色汇总求和",
-            font=("Microsoft YaHei", 12),
-            command=self.run_color_sum,
-            bg="#f0f0f0"
-        )
-        self.btn_color_sum.pack(pady=(10, 0))
-
-        # 底部日志区域
-        self.frame_bottom = tk.Frame(root)
-        self.frame_bottom.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
-
-        # 日志标签
-        tk.Label(self.frame_bottom, text="运行日志：").pack(anchor="w")
-
-        # 日志输出文本框
-        self.log_text = scrolledtext.ScrolledText(
-            self.frame_bottom, 
-            state='disabled', 
-            height=15, 
-            font=("Consolas", 10)
-        )
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self._create_header(self.main_frame)
+        self._create_feature_area(self.main_frame)
+        self._create_log_area(self.main_frame)
 
         # 初始化自定义 logger
         self.logger = setup_logger(self.log_text)
         self.logger.info("欢迎使用 Excel 效率工具台。程序已就绪。")
+
+    def _create_header(self, parent):
+        header = tk.Frame(parent, bg=self.bg_color)
+        header.pack(fill=tk.X, pady=(0, 12))
+
+        tk.Label(
+            header,
+            text="Excel 效率工具台",
+            font=("Microsoft YaHei", 18, "bold"),
+            fg=self.text_color,
+            bg=self.bg_color,
+        ).pack(anchor="w")
+        tk.Label(
+            header,
+            text="请选择需要执行的功能。默认不自动保存目标文件，请检查后自行保存。",
+            font=("Microsoft YaHei", 10),
+            fg="#5f6b7a",
+            bg=self.bg_color,
+        ).pack(anchor="w", pady=(4, 0))
+
+    def _create_feature_area(self, parent):
+        feature_area = tk.Frame(parent, bg=self.bg_color)
+        feature_area.pack(fill=tk.X, pady=(0, 14))
+        feature_area.columnconfigure(0, weight=1, uniform="feature")
+        feature_area.columnconfigure(1, weight=1, uniform="feature")
+
+        left_column = tk.Frame(feature_area, bg=self.bg_color)
+        right_column = tk.Frame(feature_area, bg=self.bg_color)
+        left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        right_column.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+
+        self._create_feature_group(
+            left_column,
+            "拆分导出",
+            [
+                ("一簿按工作表拆分为多个文件", "btn_export_sheets", self.run_export_sheets),
+                ("按指定列拆分工作表", "btn_split_sheet", self.run_split_sheet),
+            ],
+        )
+        self._create_feature_group(
+            left_column,
+            "合并整理",
+            [
+                ("多表合并到一个新表", "btn_merge_sheets", self.run_merge_sheets),
+            ],
+        )
+        self._create_feature_group(
+            left_column,
+            "模板填报 / 附注汇总",
+            [
+                ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
+            ],
+        )
+
+        self._create_feature_group(
+            right_column,
+            "目录与检查",
+            [
+                ("生成带链接的工作表目录", "btn_sheet_index", self.run_sheet_index),
+            ],
+        )
+        self._create_feature_group(
+            right_column,
+            "批量维护",
+            [
+                ("批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
+            ],
+        )
+
+    def _create_feature_group(self, parent, title, items):
+        group = tk.LabelFrame(
+            parent,
+            text=title,
+            font=("Microsoft YaHei", 11, "bold"),
+            fg=self.text_color,
+            bg=self.card_color,
+            bd=1,
+            relief="solid",
+            padx=12,
+            pady=10,
+            labelanchor="nw",
+        )
+        group.pack(fill=tk.X, pady=(0, 10))
+
+        for index, (text, attr_name, command) in enumerate(items):
+            button = tk.Button(
+                group,
+                text=text,
+                font=("Microsoft YaHei", 10),
+                command=command,
+                width=30,
+                height=2,
+                bg="#f8fafc",
+                fg=self.text_color,
+                activebackground="#e9eef5",
+                activeforeground=self.text_color,
+                relief="groove",
+                bd=1,
+                anchor="w",
+                padx=10,
+            )
+            button.pack(fill=tk.X, pady=(0 if index == 0 else 8, 0))
+            setattr(self, attr_name, button)
+
+    def _create_log_area(self, parent):
+        self.frame_bottom = tk.Frame(parent, bg=self.bg_color)
+        self.frame_bottom.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(
+            self.frame_bottom,
+            text="运行日志",
+            font=("Microsoft YaHei", 11, "bold"),
+            fg=self.text_color,
+            bg=self.bg_color,
+        ).pack(anchor="w", pady=(0, 6))
+
+        log_frame = tk.Frame(
+            self.frame_bottom,
+            bg=self.card_color,
+            highlightbackground=self.border_color,
+            highlightthickness=1,
+        )
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame,
+            state="disabled",
+            height=14,
+            font=("Consolas", 10),
+            bg="#ffffff",
+            fg="#111827",
+            insertbackground="#111827",
+            relief="flat",
+            bd=0,
+            padx=8,
+            pady=8,
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
 
     def _center_window(self, window, width=None, height=None):
         window.update_idletasks()
