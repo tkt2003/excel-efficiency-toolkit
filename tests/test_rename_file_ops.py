@@ -33,7 +33,7 @@ def test_create_rename_rule_workbook_writes_expected_sheets_and_rows(tmp_path):
         sheet = workbook[RULE_SHEET_NAME]
         assert [sheet.cell(row=1, column=i).value for i in range(1, 9)] == RULE_HEADERS
         assert sheet["A2"].value == str(source_path.resolve())
-        assert sheet["B2"].value == "原文件.xlsx"
+        assert sheet["B2"].value == "原文件"
         assert sheet["C2"].value is None
         assert sheet["D2"].value == ".xlsx"
         assert sheet["H2"].value == ".xlsx"
@@ -217,6 +217,7 @@ def test_write_rename_results_updates_status_columns_and_log_sheet(tmp_path):
         assert log_sheet.max_row == 2
         assert log_sheet["B2"].value == str(source_path)
         assert log_sheet["C2"].value == str(tmp_path / "new.xlsx")
+        assert log_sheet["D2"].value == "old"
         assert log_sheet["F2"].value == "成功"
     finally:
         workbook.close()

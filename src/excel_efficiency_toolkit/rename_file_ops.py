@@ -15,7 +15,7 @@ LOG_SHEET_NAME = "处理日志"
 
 RULE_HEADERS = [
     "原文件路径",
-    "原文件名",
+    "原文件名（不含后缀）",
     "新文件名（不含后缀）",
     "后缀名",
     "目标文件路径预览",
@@ -219,7 +219,7 @@ def write_rename_results_to_workbook(rule_workbook_path: str, actions: list[Rena
                     now,
                     action.original_path,
                     action.target_path,
-                    Path(action.original_path).name if action.original_path else "",
+                    Path(action.original_path).stem if action.original_path else "",
                     action.final_name,
                     action.status,
                     action.message,
@@ -280,7 +280,7 @@ def _write_rule_sheet(sheet, file_paths: list[str]) -> None:
     for file_path in file_paths:
         path = Path(file_path)
         extension = path.suffix
-        sheet.append([str(path), path.name, "", extension, "", "", "", extension])
+        sheet.append([str(path), path.stem, "", extension, "", "", "", extension])
 
     for row in range(2, sheet.max_row + 1):
         sheet.cell(row=row, column=3).fill = fill
