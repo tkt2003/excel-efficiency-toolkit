@@ -2,6 +2,12 @@ import os
 import tkinter as tk
 from tkinter import filedialog, scrolledtext
 from .color_sum_ops import sum_current_sheet_by_fill_color, sum_matching_sheets_by_fill_color
+from .data_drill_ops import (
+    build_data_drill_records,
+    build_unique_output_path,
+    summarize_data_drill_records,
+    write_data_drill_result_workbook,
+)
 from .delete_sheet_ops import (
     execute_batch_delete_sheets_in_place,
     generate_temporary_delete_sheet_rule_table,
@@ -115,6 +121,7 @@ class ExcelToolkitApp:
             "模板填报 / 附注汇总",
             [
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
+                ("数据穿透取数", "btn_data_drill", self.run_data_drill),
             ],
         )
 
@@ -968,6 +975,153 @@ class ExcelToolkitApp:
             self._log_error(f"按颜色汇总求和失败：{type(e).__name__}: {e}")
         finally:
             self.btn_color_sum.config(state="normal")
+
+    def run_data_drill(self):
+        """按钮回调函数，按当前活动 sheet 和选中单元格批量穿透读取源工作簿取值"""
+        self._log_info("数据穿透取数：开始操作。")
+        try:
+            context = self._get_current_excel_context_for_data_drill()
+            if not self._confirm_data_drill_context(context):
+                self._log_info("用户已取消操作。")
+                return
+
+            source_paths = filedialog.askopenfilenames(
+                title="请选择源 Excel 文件",
+                initialdir=context["workbook_dir"],
+                filetypes=[
+                    ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                    ("所有文件", "*.*"),
+                ],
+            )
+            if not source_paths:
+                self._log_info("用户已取消操作。")
+                return
+
+            self.btn_data_drill.config(state="disabled")
+            output_path = build_unique_output_path(context["workbook_dir"])
+            self._log_info(
+                f"当前取数点：{context['sheet_name']}!{context['cell_address']}；"
+                f"源文件数量：{len(source_paths)}。"
+            )
+            records = build_data_drill_records(
+                source_paths=list(source_paths),
+                sheet_name=context["sheet_name"],
+                cell_address=context["cell_address"],
+                logger=self._flushing_logger(),
+            )
+            write_data_drill_result_workbook(
+                records=records,
+                output_path=output_path,
+                source_sheet_name=context["sheet_name"],
+                cell_address=context["cell_address"],
+            )
+            summary = summarize_data_drill_records(records)
+
+            try:
+                os.startfile(output_path)
+                self._log_info(f"结果文件已生成并尝试打开：{output_path}")
+            except Exception as open_error:
+                self._log_error(f"结果文件已生成，但自动打开失败：{open_error}")
+                self._log_info(f"请手动打开结果文件：{output_path}")
+
+            self._log_info(
+                "数据穿透取数完成："
+                f"成功 {summary['success_count']} 个；"
+                f"跳过 {summary['skipped_count']} 个；"
+                f"失败 {summary['failed_count']} 个。"
+            )
+            self._log_info("当前活动工作簿未被修改、未被保存。")
+            self._show_info_no_grab(
+                "数据穿透取数",
+                "数据穿透取数完成。\n"
+                f"成功数量：{summary['success_count']}\n"
+                f"跳过数量：{summary['skipped_count']}\n"
+                f"失败数量：{summary['failed_count']}\n"
+                f"结果文件路径：{output_path}\n\n"
+                "当前活动工作簿未被修改、未被保存。",
+                dialog_width=560,
+                wraplength=500,
+            )
+        except Exception as e:
+            self._log_error(f"数据穿透取数失败：{type(e).__name__}: {e}")
+            self._show_info_no_grab(
+                "数据穿透取数",
+                f"数据穿透取数失败：{e}",
+                dialog_width=520,
+                wraplength=460,
+            )
+        finally:
+            self.btn_data_drill.config(state="normal")
+
+    def _confirm_data_drill_context(self, context):
+        choice = self._ask_choice_no_grab(
+            "数据穿透取数",
+            "请确认当前取数点：\n"
+            f"当前工作簿名：{context['workbook_name']}\n"
+            f"当前工作簿路径：{context['workbook_path']}\n"
+            f"当前 Sheet 名：{context['sheet_name']}\n"
+            f"当前单元格地址：{context['cell_address']}\n"
+            f"即将读取各源文件中的：{context['sheet_name']}!{context['cell_address']}\n\n"
+            "结果文件将生成到当前工作簿同目录。\n"
+            "当前工作簿不会被修改或保存。",
+            [("继续选择源文件", "continue")],
+            dialog_width=560,
+            wraplength=500,
+        )
+        return choice == "continue"
+
+    def _get_current_excel_context_for_data_drill(self):
+        try:
+            import pythoncom
+            import win32com.client
+        except Exception as e:
+            raise RuntimeError("无法加载 Excel COM 组件，请确认已安装 pywin32 并在 Windows + Excel 环境运行。") from e
+
+        pythoncom.CoInitialize()
+        try:
+            try:
+                excel = win32com.client.GetActiveObject("Excel.Application")
+            except Exception as e:
+                raise RuntimeError("未检测到正在运行的 Excel，请先打开目标/合并工作簿后重试。") from e
+
+            try:
+                workbook = excel.ActiveWorkbook
+            except Exception as e:
+                raise RuntimeError("Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。") from e
+            if workbook is None:
+                raise RuntimeError("Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。")
+
+            workbook_name = str(workbook.Name)
+            workbook_dir = str(workbook.Path or "").strip()
+            if not workbook_dir:
+                raise RuntimeError("当前活动工作簿尚未保存，无法确定结果文件输出目录。请先保存当前工作簿后重试。")
+            workbook_path = str(workbook.FullName or "").strip()
+            if not os.path.dirname(workbook_path):
+                workbook_path = os.path.join(workbook_dir, workbook_name)
+
+            try:
+                active_sheet = excel.ActiveSheet
+                sheet_name = str(active_sheet.Name)
+            except Exception as e:
+                raise RuntimeError("无法读取当前活动 Sheet，请先切换到目标工作表后重试。") from e
+
+            try:
+                active_cell = excel.ActiveCell
+                cell_address = str(active_cell.Address(False, False)).replace("$", "").strip()
+            except Exception as e:
+                raise RuntimeError("没有有效选区，请先选中一个需要追查的单元格后重试。") from e
+            if not cell_address:
+                raise RuntimeError("没有有效选区，请先选中一个需要追查的单元格后重试。")
+
+            return {
+                "workbook_name": workbook_name,
+                "workbook_path": workbook_path,
+                "workbook_dir": workbook_dir,
+                "sheet_name": sheet_name,
+                "cell_address": cell_address,
+            }
+        finally:
+            pythoncom.CoUninitialize()
 
     def _log_single_color_sum_result(self, result):
         self._log_info(
