@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
@@ -151,49 +152,58 @@ def read_rename_rules(rule_workbook_path: str) -> list[RenameRule]:
 
 
 def build_rename_plan(rules: list[RenameRule], settings: RenameSettings) -> list[RenameAction]:
-    actions: list[RenameAction] = []
-    assigned_targets: set[str] = set()
+    base_actions = [_build_base_action(rule, settings) for rule in rules]
+    original_paths_to_be_renamed = _success_original_paths(base_actions)
 
-    for rule in rules:
-        action = _build_single_action(rule, settings, assigned_targets)
-        if action.status == "成功":
-            assigned_targets.add(_normalize_path_for_compare(action.target_path))
-        actions.append(action)
+    actions = base_actions
+    for _ in range(len(base_actions) + 1):
+        actions = _resolve_target_conflicts(base_actions, settings, original_paths_to_be_renamed)
+        next_original_paths = _success_original_paths(actions)
+        if next_original_paths == original_paths_to_be_renamed:
+            return actions
+        original_paths_to_be_renamed = next_original_paths
 
     return actions
 
 
 def execute_rename_plan(actions: list[RenameAction]) -> dict:
     success_count = 0
-    skipped_count = 0
+    skipped_count = len([action for action in actions if action.status == "跳过"])
     failed_count = 0
+    executable_actions = [action for action in actions if action.status == "成功"]
+    moved_actions: list[tuple[RenameAction, Path, Path]] = []
+    reserved_temp_paths: set[str] = set()
 
-    for action in actions:
-        if action.status == "跳过":
+    for index, action in enumerate(executable_actions, start=1):
+        original_path = Path(action.original_path)
+        if not original_path.exists():
+            action.status = "跳过"
+            action.message = _join_messages(action.message, "原文件不存在")
             skipped_count += 1
             continue
-        if action.status != "成功":
-            failed_count += 1
-            continue
 
+        temp_path = _build_temp_path(original_path, index, reserved_temp_paths)
+        reserved_temp_paths.add(_normalize_path_for_compare(str(temp_path)))
         try:
-            original_path = Path(action.original_path)
-            target_path = Path(action.target_path)
-            if not original_path.exists():
-                action.status = "跳过"
-                action.message = _join_messages(action.message, "原文件不存在")
-                skipped_count += 1
-                continue
-            if target_path.exists():
-                action.status = "失败"
-                action.message = _join_messages(action.message, "目标文件已存在，未覆盖")
-                failed_count += 1
-                continue
-            original_path.rename(target_path)
-            success_count += 1
+            original_path.rename(temp_path)
+            moved_actions.append((action, original_path, temp_path))
         except Exception as e:
             action.status = "失败"
-            action.message = _join_messages(action.message, f"重命名失败：{e}")
+            action.message = _join_messages(action.message, f"第一阶段临时重命名失败：{e}")
+            failed_count += 1
+
+    for action, original_path, temp_path in moved_actions:
+        target_path = Path(action.target_path)
+        try:
+            if target_path.exists():
+                raise FileExistsError("目标文件已存在，未覆盖")
+            temp_path.rename(target_path)
+            action.message = "已重命名" if action.message == "已重命名" else _join_messages(action.message, "已重命名")
+            success_count += 1
+        except Exception as e:
+            rollback_message = _rollback_temp_file(temp_path, original_path)
+            action.status = "失败"
+            action.message = _join_messages(action.message, f"第二阶段重命名失败：{e}", rollback_message)
             failed_count += 1
 
     return {
@@ -201,6 +211,81 @@ def execute_rename_plan(actions: list[RenameAction]) -> dict:
         "skipped_count": skipped_count,
         "failed_count": failed_count,
     }
+
+
+def _rollback_temp_file(temp_path: Path, original_path: Path) -> str:
+    if not temp_path.exists():
+        return ""
+    if original_path.exists():
+        return f"临时文件保留在：{temp_path}"
+    try:
+        temp_path.rename(original_path)
+        return "已回滚到原文件名"
+    except Exception as rollback_error:
+        return f"回滚失败，临时文件保留在：{temp_path}；回滚错误：{rollback_error}"
+
+
+def _build_temp_path(original_path: Path, index: int, reserved_temp_paths: set[str]) -> Path:
+    parent = original_path.parent
+    suffix = original_path.suffix
+    while True:
+        candidate = parent / f".__rename_tmp_{uuid4().hex}_{index}{suffix}"
+        normalized_candidate = _normalize_path_for_compare(str(candidate))
+        if not candidate.exists() and normalized_candidate not in reserved_temp_paths:
+            return candidate
+        index += 1
+
+
+def _success_original_paths(actions: list[RenameAction]) -> set[str]:
+    return {
+        _normalize_path_for_compare(action.original_path)
+        for action in actions
+        if action.status == "成功"
+    }
+
+
+def _resolve_target_conflicts(
+    base_actions: list[RenameAction],
+    settings: RenameSettings,
+    original_paths_to_be_renamed: set[str],
+) -> list[RenameAction]:
+    actions: list[RenameAction] = []
+    assigned_targets: set[str] = set()
+
+    for base_action in base_actions:
+        action = _copy_action(base_action)
+        if action.status != "成功":
+            actions.append(action)
+            continue
+
+        target_path = Path(action.target_path)
+        target_compare = _normalize_path_for_compare(str(target_path))
+        target_exists_external = target_path.exists() and target_compare not in original_paths_to_be_renamed
+        target_assigned = target_compare in assigned_targets
+        if target_exists_external or target_assigned:
+            if settings.existing_target_mode == "跳过":
+                action.status = "跳过"
+                action.message = "目标文件已存在" if target_exists_external else "目标文件名冲突"
+                actions.append(action)
+                continue
+
+            numbered_target_path = _build_numbered_target_path(
+                target_path,
+                assigned_targets,
+                original_paths_to_be_renamed,
+            )
+            action.target_path = str(numbered_target_path)
+            action.final_name = numbered_target_path.name
+            action.message = _join_messages(
+                action.message if action.message != "已重命名" else "",
+                "目标文件名冲突，已自动编号" if target_assigned else "目标文件已存在，已自动编号",
+            ) or "已重命名"
+            target_compare = _normalize_path_for_compare(action.target_path)
+
+        assigned_targets.add(target_compare)
+        actions.append(action)
+
+    return actions
 
 
 def write_rename_results_to_workbook(rule_workbook_path: str, actions: list[RenameAction]) -> None:
@@ -320,7 +405,7 @@ def _write_log_sheet(sheet) -> None:
     )
 
 
-def _build_single_action(rule: RenameRule, settings: RenameSettings, assigned_targets: set[str]) -> RenameAction:
+def _build_base_action(rule: RenameRule, settings: RenameSettings) -> RenameAction:
     original_path_text = rule.original_path.strip()
     if not original_path_text:
         return _skip_action(rule, "", "原文件路径为空")
@@ -365,18 +450,6 @@ def _build_single_action(rule: RenameRule, settings: RenameSettings, assigned_ta
     if _normalize_path_for_compare(str(target_path)) == _normalize_path_for_compare(str(original_path)):
         return _skip_action(rule, str(target_path), "新旧文件名相同", final_name)
 
-    target_compare = _normalize_path_for_compare(str(target_path))
-    target_exists = target_path.exists()
-    target_assigned = target_compare in assigned_targets
-    if target_exists or target_assigned:
-        if settings.existing_target_mode == "跳过":
-            message = "目标文件已存在" if target_exists else "目标文件名冲突"
-            return _skip_action(rule, str(target_path), message, final_name)
-
-        target_path = _build_numbered_target_path(target_path, assigned_targets)
-        final_name = target_path.name
-        message_parts.append("目标文件名冲突，已自动编号" if target_assigned else "目标文件已存在，已自动编号")
-
     return RenameAction(
         row_number=rule.row_number,
         original_path=str(original_path),
@@ -387,16 +460,33 @@ def _build_single_action(rule: RenameRule, settings: RenameSettings, assigned_ta
     )
 
 
-def _build_numbered_target_path(target_path: Path, assigned_targets: set[str]) -> Path:
+def _build_numbered_target_path(
+    target_path: Path,
+    assigned_targets: set[str],
+    original_paths_to_be_renamed: set[str],
+) -> Path:
     stem = target_path.stem
     suffix = target_path.suffix
     parent = target_path.parent
     counter = 1
     while True:
         candidate = parent / f"{stem}_{counter}{suffix}"
-        if not candidate.exists() and _normalize_path_for_compare(str(candidate)) not in assigned_targets:
+        candidate_compare = _normalize_path_for_compare(str(candidate))
+        candidate_exists_external = candidate.exists() and candidate_compare not in original_paths_to_be_renamed
+        if not candidate_exists_external and candidate_compare not in assigned_targets:
             return candidate
         counter += 1
+
+
+def _copy_action(action: RenameAction) -> RenameAction:
+    return RenameAction(
+        row_number=action.row_number,
+        original_path=action.original_path,
+        target_path=action.target_path,
+        status=action.status,
+        message=action.message,
+        final_name=action.final_name,
+    )
 
 
 def _split_name_and_extension(name: str) -> tuple[str, str]:

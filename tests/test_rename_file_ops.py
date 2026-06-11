@@ -142,6 +142,63 @@ def test_internal_target_conflict_auto_numbers_or_skips(tmp_path):
     assert plan[1].message == "目标文件名冲突"
 
 
+def test_chain_rename_plan_allows_targets_that_will_be_vacated(tmp_path):
+    first_path = _create_file(tmp_path / "1.xlsx")
+    second_path = _create_file(tmp_path / "2.xlsx")
+    third_path = _create_file(tmp_path / "3.xlsx")
+    rules = [
+        _rule(first_path, new_name="2", extension=".xlsx", row_number=2),
+        _rule(second_path, new_name="3", extension=".xlsx", row_number=3),
+        _rule(third_path, new_name="4", extension=".xlsx", row_number=4),
+    ]
+
+    plan = build_rename_plan(rules, RenameSettings(existing_target_mode="自动编号"))
+
+    assert [Path(action.target_path).name for action in plan] == ["2.xlsx", "3.xlsx", "4.xlsx"]
+
+
+def test_execute_rename_plan_supports_chain_rename_without_numbering(tmp_path):
+    first_path = _create_file(tmp_path / "1.xlsx")
+    second_path = _create_file(tmp_path / "2.xlsx")
+    third_path = _create_file(tmp_path / "3.xlsx")
+    actions = build_rename_plan(
+        [
+            _rule(first_path, new_name="2", extension=".xlsx", row_number=2),
+            _rule(second_path, new_name="3", extension=".xlsx", row_number=3),
+            _rule(third_path, new_name="4", extension=".xlsx", row_number=4),
+        ],
+        RenameSettings(),
+    )
+
+    summary = execute_rename_plan(actions)
+
+    assert summary == {"success_count": 3, "skipped_count": 0, "failed_count": 0}
+    assert not (tmp_path / "1.xlsx").exists()
+    assert (tmp_path / "2.xlsx").exists()
+    assert (tmp_path / "3.xlsx").exists()
+    assert (tmp_path / "4.xlsx").exists()
+    assert not list(tmp_path.glob(".__rename_tmp_*"))
+
+
+def test_execute_rename_plan_supports_swap_rename(tmp_path):
+    first_path = _create_file(tmp_path / "A.xlsx", "a")
+    second_path = _create_file(tmp_path / "B.xlsx", "b")
+    actions = build_rename_plan(
+        [
+            _rule(first_path, new_name="B", extension=".xlsx", row_number=2),
+            _rule(second_path, new_name="A", extension=".xlsx", row_number=3),
+        ],
+        RenameSettings(),
+    )
+
+    summary = execute_rename_plan(actions)
+
+    assert summary == {"success_count": 2, "skipped_count": 0, "failed_count": 0}
+    assert (tmp_path / "A.xlsx").read_text(encoding="utf-8") == "b"
+    assert (tmp_path / "B.xlsx").read_text(encoding="utf-8") == "a"
+    assert not list(tmp_path.glob(".__rename_tmp_*"))
+
+
 def test_missing_original_file_is_skipped(tmp_path):
     source_path = tmp_path / "missing.xlsx"
 

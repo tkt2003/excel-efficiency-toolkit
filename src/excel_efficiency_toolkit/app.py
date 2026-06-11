@@ -18,6 +18,20 @@ from .rename_file_ops import (
     read_rename_settings,
     write_rename_results_to_workbook,
 )
+from .rename_sheet_ops import (
+    build_skipped_sheet_rename_actions,
+    build_sheet_rename_plan,
+    create_sheet_rename_rule_workbook,
+    execute_sheet_rename_plan,
+    group_sheet_rename_rules_by_workbook_path,
+    is_excel_workbook_file,
+    is_office_temp_file,
+    is_sheet_hidden_by_visible_value,
+    read_sheet_rename_rules,
+    read_sheet_rename_settings,
+    summarize_sheet_rename_actions,
+    write_sheet_rename_results_to_workbook,
+)
 from .sheet_ops import generate_sheet_index_sheet_with_links
 from .table_ops import (
     merge_workbook_sheets_to_new_sheet,
@@ -115,6 +129,7 @@ class ExcelToolkitApp:
             [
                 ("批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
                 ("批量重命名文件", "btn_rename_files", self.run_batch_rename_files),
+                ("批量重命名工作表", "btn_rename_sheets", self.run_batch_rename_sheets),
             ],
         )
 
@@ -569,6 +584,132 @@ class ExcelToolkitApp:
         finally:
             self.btn_sheet_index.config(state="normal")
 
+    def run_batch_rename_sheets(self):
+        """按钮回调函数，生成临时规则表后确认批量重命名工作表"""
+        self.logger.info("批量重命名工作表：开始操作。")
+        source_paths = filedialog.askopenfilenames(
+            title="请选择需要批量重命名工作表的 Excel 文件",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_paths:
+            self.logger.info("用户已取消操作")
+            return
+
+        self.btn_rename_sheets.config(state="disabled")
+        try:
+            self.logger.info(f"已选择文件数量：{len(source_paths)}")
+            workbook_infos = self._read_sheet_infos_from_workbook_files(list(source_paths))
+            readable_workbook_count = len([info for info in workbook_infos if not info.get("error")])
+            sheet_count = sum(len(info.get("sheet_infos", [])) for info in workbook_infos)
+            self.logger.info(f"读取成功工作簿数量：{readable_workbook_count}")
+            self.logger.info(f"读取工作表数量：{sheet_count}")
+
+            rule_path = create_sheet_rename_rule_workbook(workbook_infos=workbook_infos)
+            self.logger.info(f"已生成工作表重命名规则表：{rule_path}")
+            try:
+                os.startfile(rule_path)
+                self.logger.info("规则表已打开，请填写 D 列，保存并关闭规则表后点击执行。")
+            except Exception as open_error:
+                self.logger.error(f"规则表已生成，但自动打开失败：{open_error}")
+                self.logger.info(f"请手动打开规则表：{rule_path}")
+
+            if not self._confirm_sheet_rename_rule_ready(rule_path):
+                self.logger.info("用户已取消操作")
+        except Exception as e:
+            self.logger.error(f"批量重命名工作表失败：{e}")
+            self._show_info_no_grab(
+                "批量重命名工作表",
+                f"批量重命名工作表失败：{e}",
+            )
+        finally:
+            self.btn_rename_sheets.config(state="normal")
+
+    def _read_sheet_infos_from_workbook_files(self, source_paths):
+        import pythoncom
+        import win32com.client
+
+        pythoncom.CoInitialize()
+        excel = None
+        workbook = None
+        workbook_infos = []
+
+        try:
+            excel = win32com.client.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+
+            for source_path in source_paths:
+                workbook = None
+                abs_path = os.path.abspath(source_path)
+                workbook_info = {
+                    "workbook_path": abs_path,
+                    "workbook_name": os.path.basename(abs_path),
+                    "sheet_infos": [],
+                }
+                if is_office_temp_file(abs_path):
+                    workbook_info["error"] = "临时文件已跳过"
+                    workbook_infos.append(workbook_info)
+                    continue
+                if not is_excel_workbook_file(abs_path):
+                    workbook_info["error"] = "不是支持的 Excel 文件"
+                    workbook_infos.append(workbook_info)
+                    continue
+                if not os.path.exists(abs_path):
+                    workbook_info["error"] = "原文件不存在"
+                    workbook_infos.append(workbook_info)
+                    continue
+
+                try:
+                    self.logger.info(f"正在读取工作表清单：{abs_path}")
+                    workbook = excel.Workbooks.Open(
+                        abs_path,
+                        ReadOnly=True,
+                        UpdateLinks=0,
+                    )
+                    workbook_info["workbook_name"] = workbook.Name
+                    workbook_info["sheet_infos"] = self._read_workbook_sheet_infos(workbook)
+                except Exception as e:
+                    workbook_info["error"] = f"文件打开失败：{e}"
+                finally:
+                    if workbook is not None:
+                        try:
+                            workbook.Close(SaveChanges=False)
+                        except Exception:
+                            pass
+                        workbook = None
+
+                workbook_infos.append(workbook_info)
+
+            return workbook_infos
+
+        finally:
+            if workbook is not None:
+                try:
+                    workbook.Close(SaveChanges=False)
+                except Exception:
+                    pass
+            if excel is not None:
+                try:
+                    excel.Quit()
+                except Exception:
+                    pass
+            pythoncom.CoUninitialize()
+
+    def _read_workbook_sheet_infos(self, workbook):
+        sheet_infos = []
+        for index, sheet in enumerate(workbook.Worksheets, start=1):
+            sheet_infos.append(
+                {
+                    "name": sheet.Name,
+                    "is_hidden": is_sheet_hidden_by_visible_value(sheet.Visible),
+                    "order": index,
+                }
+            )
+        return sheet_infos
+
     def run_delete_sheets(self):
         """按钮回调函数，生成临时规则表后确认执行批量删除"""
         source_paths = filedialog.askopenfilenames(
@@ -858,6 +999,217 @@ class ExcelToolkitApp:
             return None
 
         return mode
+
+    def _confirm_sheet_rename_rule_ready(self, rule_workbook_path):
+        result = {"execute": False}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("批量重命名工作表")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=(
+                "规则表已打开。\n"
+                "请在【重命名清单】D列填写新工作表名，\n"
+                "保存并关闭/释放规则表后，再点击执行。"
+            ),
+            font=("Microsoft YaHei", 11),
+            wraplength=400,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+
+        def execute():
+            execute_button.config(state="disabled")
+            try:
+                self.logger.info(f"正在读取工作表重命名规则表：{rule_workbook_path}")
+                try:
+                    write_sheet_rename_results_to_workbook(rule_workbook_path, [])
+                except (PermissionError, OSError) as e:
+                    self.logger.error(f"规则表无法读取或回写：{e}")
+                    self._show_sheet_rule_workbook_busy_message()
+                    return
+
+                try:
+                    settings = read_sheet_rename_settings(rule_workbook_path)
+                    rules = read_sheet_rename_rules(rule_workbook_path)
+                except (PermissionError, OSError) as e:
+                    self.logger.error(f"规则表无法读取：{e}")
+                    self._show_sheet_rule_workbook_busy_message()
+                    return
+
+                for warning in settings.warnings or []:
+                    self.logger.info(warning)
+
+                self.logger.info(f"规则行数：{len(rules)}")
+                actions = self._execute_sheet_rename_rules_by_workbook(rules, settings)
+                summary = summarize_sheet_rename_actions(actions)
+                try:
+                    write_sheet_rename_results_to_workbook(rule_workbook_path, actions)
+                    self.logger.info(f"规则表已更新：{rule_workbook_path}")
+                    result_message = (
+                        "重命名完成。\n"
+                        f"成功：{summary['success_count']} 个\n"
+                        f"跳过：{summary['skipped_count']} 个\n"
+                        f"失败：{summary['failed_count']} 个\n\n"
+                        "规则表已更新状态/备注，请查看确认。\n"
+                        "已保存成功处理的目标工作簿。"
+                    )
+                except (PermissionError, OSError) as e:
+                    self.logger.error(f"规则表无法回写：{e}")
+                    result_message = (
+                        "重命名已执行，但规则表无法回写。\n"
+                        "请确认规则表已保存并关闭后，再查看工作簿结果。"
+                    )
+
+                self.logger.info(
+                    "批量重命名工作表完成："
+                    f"成功 {summary['success_count']} 个；"
+                    f"跳过 {summary['skipped_count']} 个；"
+                    f"失败 {summary['failed_count']} 个。"
+                )
+                self._show_info_no_grab("批量重命名工作表", result_message)
+                result["execute"] = True
+                done.set(True)
+                dialog.destroy()
+            except Exception as e:
+                self.logger.error(f"批量重命名工作表失败：{e}")
+                self._show_info_no_grab(
+                    "批量重命名工作表",
+                    f"批量重命名工作表失败：{e}",
+                )
+            finally:
+                if dialog.winfo_exists():
+                    execute_button.config(state="normal")
+
+        def cancel():
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT)
+        execute_button = tk.Button(
+            button_frame,
+            text="我已填好规则，执行批量重命名工作表",
+            command=execute,
+            font=("Microsoft YaHei", 10),
+            width=32,
+        )
+        execute_button.pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        self._show_dialog_no_grab(dialog, min_width=500, min_height=170)
+        self.root.wait_variable(done)
+        return result["execute"]
+
+    def _execute_sheet_rename_rules_by_workbook(self, rules, settings):
+        import pythoncom
+        import win32com.client
+
+        grouped_rules = group_sheet_rename_rules_by_workbook_path(rules)
+        all_actions = []
+        pythoncom.CoInitialize()
+        excel = None
+        workbook = None
+
+        try:
+            excel = win32com.client.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+
+            for rules_for_workbook in grouped_rules.values():
+                workbook = None
+                workbook_path = rules_for_workbook[0].workbook_path
+                if settings.skip_temp_files and is_office_temp_file(workbook_path):
+                    all_actions.extend(build_skipped_sheet_rename_actions(rules_for_workbook, "临时文件已跳过"))
+                    continue
+                if not os.path.exists(workbook_path):
+                    all_actions.extend(build_skipped_sheet_rename_actions(rules_for_workbook, "原文件不存在"))
+                    continue
+                if not is_excel_workbook_file(workbook_path):
+                    all_actions.extend(build_skipped_sheet_rename_actions(rules_for_workbook, "不是支持的 Excel 文件"))
+                    continue
+
+                try:
+                    self.logger.info(f"正在打开目标工作簿：{workbook_path}")
+                    workbook = excel.Workbooks.Open(
+                        os.path.abspath(workbook_path),
+                        UpdateLinks=0,
+                        ReadOnly=False,
+                    )
+                    existing_sheet_names = [sheet.Name for sheet in workbook.Worksheets]
+                    actions = build_sheet_rename_plan(rules_for_workbook, existing_sheet_names, settings)
+                    valid_actions = [action for action in actions if action.status == "成功"]
+                    skipped_actions = [action for action in actions if action.status == "跳过"]
+                    self.logger.info(
+                        f"{os.path.basename(workbook_path)}："
+                        f"有效重命名任务 {len(valid_actions)} 个；跳过任务 {len(skipped_actions)} 个。"
+                    )
+
+                    for index, action in enumerate(valid_actions, start=1):
+                        self.logger.info(
+                            f"正在重命名 {index}/{len(valid_actions)}："
+                            f"{action.original_sheet_name} -> {action.target_sheet_name}"
+                        )
+
+                    execute_sheet_rename_plan(workbook, actions)
+                    if any(action.status == "成功" for action in actions):
+                        try:
+                            workbook.Save()
+                            self.logger.info(f"目标工作簿已保存：{workbook_path}")
+                        except Exception as save_error:
+                            for action in actions:
+                                if action.status == "成功":
+                                    action.status = "失败"
+                                    action.message = f"保存工作簿失败：{save_error}"
+                            self.logger.error(f"保存工作簿失败：{workbook_path}。详细信息：{save_error}")
+
+                    all_actions.extend(actions)
+                except Exception as e:
+                    self.logger.error(f"处理工作簿失败：{workbook_path}。详细信息：{e}")
+                    all_actions.extend(build_skipped_sheet_rename_actions(rules_for_workbook, f"文件打开或处理失败：{e}"))
+                finally:
+                    if workbook is not None:
+                        try:
+                            workbook.Close(SaveChanges=False)
+                        except Exception:
+                            pass
+                        workbook = None
+
+            return all_actions
+
+        finally:
+            if workbook is not None:
+                try:
+                    workbook.Close(SaveChanges=False)
+                except Exception:
+                    pass
+            if excel is not None:
+                try:
+                    excel.Quit()
+                except Exception:
+                    pass
+            pythoncom.CoUninitialize()
+
+    def _show_sheet_rule_workbook_busy_message(self):
+        self.logger.error("规则表仍被 Excel 占用，无法继续执行。请保存并关闭规则表后重试。")
+        self._show_info_no_grab(
+            "批量重命名工作表",
+            "规则表仍被 Excel 占用，无法读取或回写。\n"
+            "请先保存并关闭规则表，再点击执行批量重命名工作表。",
+        )
 
     def _confirm_rename_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
