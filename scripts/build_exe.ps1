@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
-$AppName = "老头表格助手"
+$AppName = -join ([char[]](0x8001,0x5934,0x8868,0x683C,0x52A9,0x624B))
 
 python -m pip show pyinstaller *> $null
 if ($LASTEXITCODE -ne 0) {
@@ -29,3 +29,4 @@ if (-not (Test-Path $ExePath)) {
 $ExeSize = (Get-Item $ExePath).Length
 Write-Host "Build completed: $ExePath"
 Write-Host "File size: $ExeSize bytes"
+
