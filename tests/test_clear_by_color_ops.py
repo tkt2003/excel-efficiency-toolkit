@@ -1,16 +1,22 @@
 from pathlib import Path
+from unittest.mock import Mock
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
 
+from src.excel_efficiency_toolkit import clear_by_color_ops
 from src.excel_efficiency_toolkit.clear_by_color_ops import (
     build_clear_by_color_backup_path,
     build_clear_detail_log_record,
     build_clear_ranges_from_cells,
+    build_sheet_clear_plans,
     build_clear_summary_log_record,
+    clear_workbook_file_with_openpyxl,
     clear_loaded_workbook_cells,
+    execute_clear_active_workbook_plan,
     get_load_workbook_options_for_color_clear,
     is_supported_openpyxl_color_workbook,
+    resolve_multi_workbook_save_mode,
     scan_workbook_color_matches,
     should_keep_vba_for_workbook,
     write_clear_by_color_log_workbook,
@@ -182,11 +188,13 @@ def test_build_clear_summary_log_record_structure_is_correct():
         10,
         8,
         "D:/backup.xlsx",
+        "com",
         "成功",
         "说明",
     )
     assert record["匹配工作表数量"] == 2
     assert record["清空单元格数量"] == 8
+    assert record["保存方式"] == "com"
 
 
 def test_build_clear_detail_log_record_structure_is_correct():
@@ -198,7 +206,7 @@ def test_build_clear_detail_log_record_structure_is_correct():
 def test_write_clear_by_color_log_workbook_generates_file(tmp_path):
     log_path = write_clear_by_color_log_workbook(
         str(tmp_path),
-        [build_clear_summary_log_record("D:/a.xlsx", 1, 2, 2, "D:/bak.xlsx", "成功", "完成")],
+        [build_clear_summary_log_record("D:/a.xlsx", 1, 2, 2, "D:/bak.xlsx", "openpyxl", "成功", "完成")],
         [build_clear_detail_log_record("D:/a.xlsx", "Sheet1", "A1", "成功", "")],
         timestamp="20260612_120000",
     )
@@ -206,6 +214,8 @@ def test_write_clear_by_color_log_workbook_generates_file(tmp_path):
     assert Path(log_path).exists()
     workbook = load_workbook(log_path)
     assert workbook.sheetnames == ["处理汇总", "处理明细"]
+    assert workbook["处理汇总"]["F1"].value == "保存方式"
+    assert workbook["处理汇总"]["F2"].value == "openpyxl"
     workbook.close()
 
 
@@ -213,3 +223,95 @@ def test_get_load_workbook_options_for_color_clear_uses_keep_vba_for_xlsm():
     assert should_keep_vba_for_workbook("book.xlsm") is True
     assert should_keep_vba_for_workbook("book.xlsx") is False
     assert get_load_workbook_options_for_color_clear("book.xlsm") == {"keep_vba": True}
+
+
+def test_resolve_multi_workbook_save_mode_uses_com_for_external_links(monkeypatch):
+    monkeypatch.setattr(clear_by_color_ops, "workbook_has_external_links", lambda path: True)
+    assert resolve_multi_workbook_save_mode("book.xlsx") == "com"
+
+
+def test_resolve_multi_workbook_save_mode_uses_openpyxl_for_plain_file(monkeypatch):
+    monkeypatch.setattr(clear_by_color_ops, "workbook_has_external_links", lambda path: False)
+    assert resolve_multi_workbook_save_mode("book.xlsx") == "openpyxl"
+
+
+def test_clear_workbook_file_with_openpyxl_saves_plain_workbook(tmp_path):
+    path = tmp_path / "plain.xlsx"
+    _build_clear_workbook(path)
+
+    result = clear_workbook_file_with_openpyxl(
+        str(path),
+        [{"sheet_name": "Sheet1", "cells": ["A1", "B1"]}],
+    )
+
+    reloaded = load_workbook(path)
+    assert reloaded["Sheet1"]["A1"].value is None
+    assert reloaded["Sheet1"]["B1"].value is None
+    assert result["cleared_cell_count"] == 2
+    reloaded.close()
+
+
+def test_build_sheet_clear_plans_contains_contiguous_ranges():
+    plans = build_sheet_clear_plans([
+        {"sheet_name": "Sheet1", "cells": ["A2", "B2", "D2"]},
+    ])
+
+    assert plans[0]["range_addresses"] == ["A2:B2", "D2"]
+    assert plans[0]["range_count"] == 2
+
+
+def test_execute_clear_active_workbook_plan_does_not_call_openpyxl_save(monkeypatch):
+    class FakeRange:
+        def __init__(self):
+            self.clear_count = 0
+
+        def ClearContents(self):
+            self.clear_count += 1
+
+    class FakeSheet:
+        def __init__(self):
+            self.ranges = {}
+
+        def Range(self, address):
+            self.ranges.setdefault(address, FakeRange())
+            return self.ranges[address]
+
+    class FakeWorkbook:
+        def __init__(self):
+            self.Name = "目标.xlsx"
+            self.FullName = r"D:\tmp\目标.xlsx"
+            self.Saved = True
+            self.Worksheets = []
+            self.sheet = FakeSheet()
+            fake_worksheet = Mock()
+            fake_worksheet.Name = "Sheet1"
+            fake_worksheet.Range = self.sheet.Range
+            self.Worksheets.append(fake_worksheet)
+
+    fake_workbook = FakeWorkbook()
+    monkeypatch.setattr(clear_by_color_ops, "_get_active_excel", lambda *args, **kwargs: object())
+    monkeypatch.setattr(clear_by_color_ops, "_find_open_workbook_by_path", lambda excel, path: fake_workbook)
+    monkeypatch.setattr(clear_by_color_ops, "load_workbook", Mock(side_effect=AssertionError("不应调用 openpyxl 保存当前活动工作簿")))
+
+    plan = {
+        "workbook_path": r"D:\tmp\目标.xlsx",
+        "matched_sheet_count": 1,
+        "matched_cell_count": 3,
+        "current_color_text": "Interior.Color=65535",
+        "scan_seconds": 0.01,
+        "sheet_clear_plans": [
+            {
+                "sheet_name": "Sheet1",
+                "matched_cell_count": 3,
+                "range_addresses": ["A1:B1", "D1"],
+                "range_count": 2,
+            }
+        ],
+    }
+
+    result = execute_clear_active_workbook_plan(plan)
+
+    assert result["cleared_cell_count"] == 3
+    assert result["range_group_count"] == 2
+    assert fake_workbook.sheet.ranges["A1:B1"].clear_count == 1
+    assert fake_workbook.sheet.ranges["D1"].clear_count == 1

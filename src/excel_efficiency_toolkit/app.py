@@ -1070,9 +1070,9 @@ class ExcelToolkitApp:
             f"当前颜色：{result['current_color_text']}\n"
             f"匹配工作表：{result['matched_sheet_count']}\n"
             f"清空工作表：{result['cleared_sheet_count']}\n"
-            f"清空单元格：{result['cleared_cell_count']}\n\n"
-            f"备份文件：{result['backup_path']}\n"
-            "原文件已用 openpyxl 保存，并已重新打开供检查。",
+            f"清空单元格：{result['cleared_cell_count']}\n"
+            f"批量区域：{result['range_group_count']} 组\n\n"
+            "当前工作簿未自动保存，请检查后自行保存。",
             dialog_width=520,
             wraplength=460,
         )

@@ -1,13 +1,16 @@
 import os
 import shutil
 import time
+import zipfile
 from datetime import datetime
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import MergedCell
 
 from .color_sum_ops import (
+    _cell_address_to_row_col,
     _find_openpyxl_sheet_name,
+    _find_worksheet_by_name,
     _get_active_excel,
     _get_active_target_context,
     _get_cell_address_for_log,
@@ -93,6 +96,7 @@ def build_clear_summary_log_record(
     matched_cell_count: int,
     cleared_cell_count: int,
     backup_path: str,
+    save_mode: str,
     status: str,
     note: str,
 ) -> dict:
@@ -102,6 +106,7 @@ def build_clear_summary_log_record(
         "匹配单元格数量": matched_cell_count,
         "清空单元格数量": cleared_cell_count,
         "备份路径": backup_path,
+        "保存方式": save_mode,
         "状态": status,
         "说明": note,
     }
@@ -133,7 +138,7 @@ def write_clear_by_color_log_workbook(
     workbook = Workbook()
     summary_sheet = workbook.active
     summary_sheet.title = "处理汇总"
-    summary_headers = ["文件路径", "匹配工作表数量", "匹配单元格数量", "清空单元格数量", "备份路径", "状态", "说明"]
+    summary_headers = ["文件路径", "匹配工作表数量", "匹配单元格数量", "清空单元格数量", "备份路径", "保存方式", "状态", "说明"]
     summary_sheet.append(summary_headers)
     for record in summary_records:
         summary_sheet.append([record.get(header, "") for header in summary_headers])
@@ -278,6 +283,33 @@ def build_clear_ranges_from_cells(cells: list[tuple[int, int]]) -> list[str]:
     return range_addresses
 
 
+def build_sheet_clear_plans(sheet_plans: list[dict]) -> list[dict]:
+    result = []
+    for sheet_plan in sheet_plans:
+        cells = [_cell_address_to_row_col(address) for address in sheet_plan["cells"]]
+        result.append({
+            "sheet_name": sheet_plan["sheet_name"],
+            "cells": list(sheet_plan["cells"]),
+            "matched_cell_count": len(sheet_plan["cells"]),
+            "range_addresses": build_clear_ranges_from_cells(cells),
+            "range_count": len(build_clear_ranges_from_cells(cells)),
+        })
+    return result
+
+
+def workbook_has_external_links(workbook_path: str) -> bool:
+    abs_path = os.path.abspath(workbook_path)
+    try:
+        with zipfile.ZipFile(abs_path, "r") as archive:
+            return any(name.startswith("xl/externalLinks/") for name in archive.namelist())
+    except (FileNotFoundError, zipfile.BadZipFile, OSError):
+        return False
+
+
+def resolve_multi_workbook_save_mode(workbook_path: str) -> str:
+    return "com" if workbook_has_external_links(workbook_path) else "openpyxl"
+
+
 def plan_clear_active_workbook_by_color(logger=None) -> dict:
     context = prepare_active_fill_color_context(logger=logger)
     if not context["saved_state"]:
@@ -304,6 +336,7 @@ def plan_clear_active_workbook_by_color(logger=None) -> dict:
     return {
         **context,
         **color_plan,
+        "sheet_clear_plans": build_sheet_clear_plans(color_plan["sheet_plans"]),
         "scan_seconds": scan_seconds,
     }
 
@@ -315,7 +348,6 @@ def execute_clear_active_workbook_plan(plan: dict, logger=None) -> dict:
     pythoncom.CoInitialize()
     excel = None
     workbook = None
-    backup_path = ""
     try:
         excel = _get_active_excel(win32com.client, pythoncom, logger=logger)
         workbook = _find_open_workbook_by_path(excel, plan["workbook_path"])
@@ -325,56 +357,28 @@ def execute_clear_active_workbook_plan(plan: dict, logger=None) -> dict:
         if not _get_workbook_saved_state(workbook):
             raise ValueError("当前活动工作簿存在未保存修改，请先保存后再执行按颜色清空内容。")
 
-        _log(logger, "info", "当前活动工作簿已保存，准备关闭后执行 openpyxl 清空。")
-        workbook.Close(SaveChanges=False)
-        workbook = None
-
-        backup_path = create_clear_by_color_backup(plan["workbook_path"])
-        _log(logger, "info", f"已生成备份：{backup_path}")
-
-        workbook_file = None
-        detail_records: list[dict] = []
-        try:
-            workbook_file = load_workbook(
-                plan["workbook_path"],
-                keep_vba=should_keep_vba_for_workbook(plan["workbook_path"]),
-            )
-            clear_result = clear_loaded_workbook_cells(
-                workbook_file,
-                plan["workbook_path"],
-                plan["sheet_plans"],
-                detail_records=detail_records,
-                logger=logger,
-            )
-            workbook_file.save(plan["workbook_path"])
-        finally:
-            if workbook_file is not None:
-                workbook_file.close()
-
-        reopened = excel.Workbooks.Open(plan["workbook_path"], UpdateLinks=0)
-        _log(logger, "info", f"已重新打开工作簿：{reopened.Name}")
+        clear_result = clear_open_workbook_with_com(
+            workbook,
+            plan["sheet_clear_plans"],
+            logger=logger,
+        )
         _log(logger, "info", f"清空 sheet 数：{plan['matched_sheet_count']}")
         _log(logger, "info", f"清空单元格数：{clear_result['cleared_cell_count']}")
-        _log(logger, "info", "按颜色清空内容完成：已使用 openpyxl 保存原文件并重新打开，请检查结果。")
+        _log(logger, "info", "按颜色清空内容完成：当前工作簿未自动保存，请检查后自行保存。")
 
         return {
-            "target_workbook_name": reopened.Name,
+            "target_workbook_name": workbook.Name,
             "workbook_path": plan["workbook_path"],
             "matched_sheet_count": plan["matched_sheet_count"],
             "matched_cell_count": plan["matched_cell_count"],
             "cleared_sheet_count": plan["matched_sheet_count"],
             "cleared_cell_count": clear_result["cleared_cell_count"],
             "skipped_merged_cell_count": clear_result["skipped_merged_cell_count"],
+            "range_group_count": clear_result["range_group_count"],
             "current_color_text": plan["current_color_text"],
             "scan_seconds": plan["scan_seconds"],
-            "backup_path": backup_path,
         }
     finally:
-        if workbook is not None:
-            try:
-                workbook.Close(SaveChanges=False)
-            except Exception:
-                pass
         pythoncom.CoUninitialize()
 
 
@@ -406,14 +410,14 @@ def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> d
         if os.path.basename(abs_path).startswith("~$"):
             skipped_file_count += 1
             summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "临时文件已跳过。")
+                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", "临时文件已跳过。")
             )
             continue
 
         if not os.path.exists(abs_path):
             failed_file_count += 1
             summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "失败", "目标文件不存在。")
+                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "失败", "失败", "目标文件不存在。")
             )
             continue
 
@@ -421,22 +425,20 @@ def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> d
         if ext.lower() == ".xls":
             skipped_file_count += 1
             summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", ".xls 暂不支持，请另存为 xlsx/xlsm/xltx/xltm。")
+                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", ".xls 暂不支持，请另存为 xlsx/xlsm/xltx/xltm。")
             )
             continue
 
         if not is_supported_openpyxl_color_workbook(abs_path):
             skipped_file_count += 1
             summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "不支持的文件类型。")
+                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", "不支持的文件类型。")
             )
             continue
 
-        workbook = None
         try:
-            workbook = load_workbook(abs_path, keep_vba=should_keep_vba_for_workbook(abs_path))
             scan_start = time.perf_counter()
-            color_plan = scan_loaded_workbook_color_matches(workbook, context["selected_color_key"])
+            color_plan = scan_workbook_color_matches(abs_path, context["selected_color_key"])
             scan_seconds = time.perf_counter() - scan_start
             _log(logger, "info", f"扫描耗时：{scan_seconds:.2f} 秒。")
             _log(logger, "info", f"匹配 sheet 数：{color_plan['matched_sheet_count']}")
@@ -445,20 +447,29 @@ def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> d
             if color_plan["matched_cell_count"] == 0:
                 skipped_file_count += 1
                 summary_records.append(
-                    build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "未找到同色单元格。")
+                    build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", "未找到同色单元格。")
                 )
                 continue
 
+            sheet_clear_plans = build_sheet_clear_plans(color_plan["sheet_plans"])
             backup_path = create_clear_by_color_backup(abs_path)
             _log(logger, "info", f"已生成备份：{backup_path}")
-            clear_result = clear_loaded_workbook_cells(
-                workbook,
-                abs_path,
-                color_plan["sheet_plans"],
-                detail_records,
-                logger=logger,
-            )
-            workbook.save(abs_path)
+            save_mode = resolve_multi_workbook_save_mode(abs_path)
+            _log(logger, "info", f"保存方式：{save_mode}")
+
+            if save_mode == "com":
+                clear_result = clear_closed_workbook_with_com(
+                    abs_path,
+                    sheet_clear_plans,
+                    logger=logger,
+                )
+            else:
+                clear_result = clear_workbook_file_with_openpyxl(
+                    abs_path,
+                    color_plan["sheet_plans"],
+                    detail_records=detail_records,
+                    logger=logger,
+                )
 
             modified_file_count += 1
             cleared_cell_total += clear_result["cleared_cell_count"]
@@ -474,6 +485,7 @@ def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> d
                     color_plan["matched_cell_count"],
                     clear_result["cleared_cell_count"],
                     backup_path,
+                    save_mode,
                     "成功",
                     note,
                 )
@@ -481,11 +493,8 @@ def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> d
         except Exception as e:
             failed_file_count += 1
             summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "失败", str(e))
+                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "失败", "失败", str(e))
             )
-        finally:
-            if workbook is not None:
-                workbook.close()
 
     log_path = write_clear_by_color_log_workbook(output_dir, summary_records, detail_records)
     _log(logger, "info", f"处理日志：{log_path}")
@@ -541,6 +550,89 @@ def clear_loaded_workbook_cells(
         "cleared_cell_count": cleared_cell_count,
         "skipped_merged_cell_count": skipped_merged_cell_count,
     }
+
+
+def clear_workbook_file_with_openpyxl(
+    workbook_path: str,
+    sheet_plans: list[dict],
+    detail_records: list[dict] | None = None,
+    logger=None,
+) -> dict:
+    workbook = None
+    try:
+        workbook = load_workbook(workbook_path, keep_vba=should_keep_vba_for_workbook(workbook_path))
+        result = clear_loaded_workbook_cells(
+            workbook,
+            workbook_path,
+            sheet_plans,
+            detail_records=detail_records,
+            logger=logger,
+        )
+        workbook.save(workbook_path)
+        return {
+            **result,
+            "range_group_count": 0,
+        }
+    finally:
+        if workbook is not None:
+            workbook.close()
+
+
+def clear_open_workbook_with_com(workbook, sheet_clear_plans: list[dict], logger=None) -> dict:
+    cleared_cell_count = 0
+    skipped_merged_cell_count = 0
+    range_group_count = 0
+
+    for sheet_plan in sheet_clear_plans:
+        worksheet = _find_worksheet_by_name(workbook, sheet_plan["sheet_name"])
+        if worksheet is None:
+            raise RuntimeError(f"工作簿中不存在工作表：{sheet_plan['sheet_name']}。")
+
+        _log(
+            logger,
+            "info",
+            f"正在清空目标工作表：{sheet_plan['sheet_name']}；待清空单元格 {sheet_plan['matched_cell_count']} 个，批量区域 {sheet_plan['range_count']} 组。",
+        )
+        for range_address in sheet_plan["range_addresses"]:
+            worksheet.Range(range_address).ClearContents()
+
+        cleared_cell_count += sheet_plan["matched_cell_count"]
+        range_group_count += sheet_plan["range_count"]
+
+    return {
+        "cleared_cell_count": cleared_cell_count,
+        "skipped_merged_cell_count": skipped_merged_cell_count,
+        "range_group_count": range_group_count,
+    }
+
+
+def clear_closed_workbook_with_com(workbook_path: str, sheet_clear_plans: list[dict], logger=None) -> dict:
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    excel = None
+    workbook = None
+    try:
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        workbook = excel.Workbooks.Open(os.path.abspath(workbook_path), UpdateLinks=0)
+        result = clear_open_workbook_with_com(workbook, sheet_clear_plans, logger=logger)
+        workbook.Save()
+        return result
+    finally:
+        if workbook is not None:
+            try:
+                workbook.Close(SaveChanges=False)
+            except Exception:
+                pass
+        if excel is not None:
+            try:
+                excel.Quit()
+            except Exception:
+                pass
+        pythoncom.CoUninitialize()
 
 
 def _load_workbook_for_scan(path: str):
