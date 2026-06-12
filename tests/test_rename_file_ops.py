@@ -89,6 +89,27 @@ def test_extension_rules_use_d_column_add_dot_and_split_suffix_from_new_name(tmp
     assert "已从新文件名中识别后缀" in plan[0].message
 
 
+def test_suffix_column_rules_cover_expected_cases(tmp_path):
+    xlsx_path = _create_file(tmp_path / "1.xlsx")
+    xlsm_path = _create_file(tmp_path / "1.xlsm", "m")
+
+    cases = [
+        (xlsx_path, "2", ".xlsx", "2.xlsx"),
+        (xlsm_path, "2", ".xlsm", "2.xlsm"),
+        (xlsx_path, "2", ".xls", "2.xls"),
+        (xlsx_path, "2.xlsx", ".xlsx", "2.xlsx"),
+        (xlsx_path, "2.xlsm", ".xlsx", "2.xlsm"),
+        (xlsx_path, "2", "", "2.xlsx"),
+    ]
+
+    for index, (source_path, new_name, extension, expected_name) in enumerate(cases, start=2):
+        plan = build_rename_plan(
+            [_rule(source_path, new_name=new_name, extension=extension, row_number=index)],
+            RenameSettings(),
+        )
+        assert Path(plan[0].target_path).name == expected_name
+
+
 def test_illegal_filename_chars_can_be_cleaned_or_skipped(tmp_path):
     source_path = _create_file(tmp_path / "old.xlsx")
 
@@ -276,6 +297,20 @@ def test_write_rename_results_updates_status_columns_and_log_sheet(tmp_path):
         assert log_sheet["C2"].value == str(tmp_path / "new.xlsx")
         assert log_sheet["D2"].value == "old"
         assert log_sheet["F2"].value == "成功"
+    finally:
+        workbook.close()
+
+
+def test_rule_workbook_keeps_original_name_column_as_stem_only(tmp_path):
+    source_path = _create_file(tmp_path / "1.xlsx")
+
+    rule_path = create_rename_rule_workbook([str(source_path)])
+
+    workbook = load_workbook(rule_path)
+    try:
+        sheet = workbook[RULE_SHEET_NAME]
+        assert sheet["B2"].value == "1"
+        assert sheet["D2"].value == ".xlsx"
     finally:
         workbook.close()
 
