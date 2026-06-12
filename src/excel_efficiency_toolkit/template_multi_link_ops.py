@@ -25,9 +25,12 @@ SETTINGS_SHEET_NAME = "参数设置"
 RULE_SHEET_NAME = "生成清单"
 LOG_SHEET_NAME = "处理日志"
 
-RULE_FIXED_HEADERS = ["是否执行", "输出文件名", "输出文件路径", "主源文件路径", "状态", "说明"]
+RULE_BASE_HEADERS = ["是否执行", "输出文件名"]
+RULE_TRAILING_HEADERS = ["状态", "说明", "输出文件路径", "主源文件路径"]
 LOG_HEADERS = ["处理时间", "规则行号", "输出文件路径", "旧链接", "新链接", "状态", "说明"]
 RULE_WORKBOOK_PREFIX = "按模板多链接生成Excel_规则表"
+EDITABLE_FILL = PatternFill(fill_type="solid", fgColor="FFF2CC")
+REFERENCE_FILL = PatternFill(fill_type="solid", fgColor="F3F4F6")
 
 
 @dataclass
@@ -163,13 +166,14 @@ def read_template_multi_link_rules(rule_workbook_path: str) -> list[TemplateMult
     workbook = load_workbook(rule_workbook_path, data_only=True)
     try:
         sheet = _require_sheet(workbook, RULE_SHEET_NAME)
+        header_map = _build_header_index_map(sheet)
         link_column_pairs = _read_link_column_pairs(sheet)
         rules: list[TemplateMultiLinkRule] = []
         for row_number in range(2, sheet.max_row + 1):
-            execute_raw = _cell_to_text(sheet.cell(row=row_number, column=1).value)
-            output_name = _cell_to_text(sheet.cell(row=row_number, column=2).value)
-            output_path = _cell_to_text(sheet.cell(row=row_number, column=3).value)
-            main_source_path = _cell_to_text(sheet.cell(row=row_number, column=4).value)
+            execute_raw = _get_text_by_header(sheet, row_number, header_map, "是否执行")
+            output_name = _get_text_by_header(sheet, row_number, header_map, "输出文件名")
+            output_path = _get_text_by_header(sheet, row_number, header_map, "输出文件路径")
+            main_source_path = _get_text_by_header(sheet, row_number, header_map, "主源文件路径")
             replacements: list[TemplateLinkReplacement] = []
             for old_col, new_col in link_column_pairs:
                 old_link_path = _cell_to_text(sheet.cell(row=row_number, column=old_col).value)
@@ -281,6 +285,7 @@ def execute_template_multi_link_actions_with_com(
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
+        excel.EnableEvents = False
         excel.AskToUpdateLinks = False
 
         for action in executable_actions:
@@ -373,13 +378,14 @@ def write_template_multi_link_results_to_workbook(
     try:
         rule_sheet = _require_sheet(workbook, RULE_SHEET_NAME)
         log_sheet = _require_sheet(workbook, LOG_SHEET_NAME)
+        header_map = _build_header_index_map(rule_sheet)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         for action in actions:
-            rule_sheet.cell(row=action.row_number, column=2, value=action.output_name)
-            rule_sheet.cell(row=action.row_number, column=3, value=action.output_path)
-            rule_sheet.cell(row=action.row_number, column=5, value=action.status)
-            rule_sheet.cell(row=action.row_number, column=6, value=action.message)
+            _write_value_by_header(rule_sheet, action.row_number, header_map, "输出文件名", action.output_name)
+            _write_value_by_header(rule_sheet, action.row_number, header_map, "输出文件路径", action.output_path)
+            _write_value_by_header(rule_sheet, action.row_number, header_map, "状态", action.status)
+            _write_value_by_header(rule_sheet, action.row_number, header_map, "说明", action.message)
             if action.replacements:
                 for replacement in action.replacements:
                     log_sheet.append(
@@ -442,11 +448,12 @@ def _write_instruction_sheet(sheet) -> None:
     rows = [
         ["按模板多链接生成 Excel 使用说明"],
         ["1. 本功能适用于模板中存在多个外部链接，并且每个输出文件可能替换不同链接的场景。"],
-        ["2. 【生成清单】每一行代表一份输出 Excel。"],
-        ["3. 主链接的新链接列已自动填写主源文件路径，决定最终生成多少份输出文件。"],
-        ["4. 其他旧链接的新链接列可手工填写；留空表示该旧链接保持不变。"],
-        ["5. 保存并关闭规则表后，回到工具台点击“我已检查规则，开始生成”。"],
-        ["6. 原模板不会被修改；输出文件已存在时自动编号，不覆盖。"],
+        ["2. 主链接决定生成清单行数；【生成清单】每一行代表一份输出 Excel。"],
+        ["3. 主链接的新链接列已自动填写主源文件路径；其他新链接列默认留空。"],
+        ["4. 新链接为空表示不替换；多个旧链接可在同一行分别填写各自的新链接。"],
+        ["5. 执行后会回写【生成清单】中的状态和说明，并在【处理日志】记录明细。"],
+        ["6. 保存并关闭规则表后，回到工具台点击“我已检查规则，开始生成”。"],
+        ["7. 原模板不会被修改；输出文件已存在时自动编号，不覆盖。"],
     ]
     _append_rows(sheet, rows)
     sheet["A1"].font = Font(bold=True)
@@ -474,36 +481,39 @@ def _write_rule_sheet(
     main_source_paths: list[str],
     template_suffix: str,
 ) -> None:
-    headers = RULE_FIXED_HEADERS[:]
+    headers = RULE_BASE_HEADERS[:]
     for index in range(1, len(old_links) + 1):
         headers.extend([f"旧链接 {index}", f"新链接 {index}"])
+    headers.extend(RULE_TRAILING_HEADERS)
     sheet.append(headers)
     _style_header(sheet, 1, len(headers))
 
-    editable_fill = PatternFill(fill_type="solid", fgColor="FFF2CC")
+    trailing_start = len(headers) - len(RULE_TRAILING_HEADERS) + 1
     used_output_paths: set[str] = set()
     for main_source_path in main_source_paths:
         output_name = build_output_filename(main_source_path, template_suffix, settings.output_name_suffix)
         output_path = build_unique_output_path(settings.output_dir, output_name, used_output_paths)
         used_output_paths.add(output_path)
-        row = ["是", os.path.basename(output_path), output_path, main_source_path, "", ""]
+        row = ["是", os.path.basename(output_path)]
         for old_link in old_links:
             new_link = main_source_path if _same_link_path(old_link, settings.main_old_link) else ""
             row.extend([old_link, new_link])
+        row.extend(["", "", output_path, main_source_path])
         sheet.append(row)
 
     for row_number in range(2, sheet.max_row + 1):
-        sheet.cell(row=row_number, column=1).fill = editable_fill
-        sheet.cell(row=row_number, column=2).fill = editable_fill
-        sheet.cell(row=row_number, column=3).fill = editable_fill
-        for column in range(8, len(headers) + 1, 2):
-            sheet.cell(row=row_number, column=column).fill = editable_fill
+        sheet.cell(row=row_number, column=2).fill = REFERENCE_FILL
+        for index in range(len(old_links)):
+            old_col = 3 + index * 2
+            new_col = old_col + 1
+            sheet.cell(row=row_number, column=old_col).fill = REFERENCE_FILL
+            sheet.cell(row=row_number, column=new_col).fill = EDITABLE_FILL
+        for column in range(trailing_start, len(headers) + 1):
+            if headers[column - 1] in {"输出文件路径", "主源文件路径"}:
+                sheet.cell(row=row_number, column=column).fill = REFERENCE_FILL
 
-    widths = {"A": 12, "B": 28, "C": 64, "D": 64, "E": 12, "F": 42}
-    for column_number in range(7, len(headers) + 1):
-        widths[get_column_letter(column_number)] = 58
-    _set_widths(sheet, widths)
-    sheet.freeze_panes = "A2"
+    _auto_fit_columns(sheet)
+    sheet.freeze_panes = "C2"
 
 
 def _write_log_sheet(sheet) -> None:
@@ -515,14 +525,37 @@ def _write_log_sheet(sheet) -> None:
 
 def _read_link_column_pairs(sheet) -> list[tuple[int, int]]:
     pairs: list[tuple[int, int]] = []
-    column = 7
-    while column <= sheet.max_column:
+    for column in range(1, sheet.max_column + 1):
         old_header = _cell_to_text(sheet.cell(row=1, column=column).value)
+        if not old_header.startswith("旧链接"):
+            continue
         new_header = _cell_to_text(sheet.cell(row=1, column=column + 1).value)
-        if old_header.startswith("旧链接") and new_header.startswith("新链接"):
+        if new_header.startswith("新链接"):
             pairs.append((column, column + 1))
-        column += 2
     return pairs
+
+
+def _build_header_index_map(sheet) -> dict[str, int]:
+    header_map: dict[str, int] = {}
+    for column in range(1, sheet.max_column + 1):
+        header = _cell_to_text(sheet.cell(row=1, column=column).value)
+        if header:
+            header_map[header] = column
+    return header_map
+
+
+def _get_text_by_header(sheet, row_number: int, header_map: dict[str, int], header: str) -> str:
+    column = header_map.get(header)
+    if not column:
+        return ""
+    return _cell_to_text(sheet.cell(row=row_number, column=column).value)
+
+
+def _write_value_by_header(sheet, row_number: int, header_map: dict[str, int], header: str, value: object) -> None:
+    column = header_map.get(header)
+    if not column:
+        raise ValueError(f"规则表缺少“{header}”列。")
+    sheet.cell(row=row_number, column=column, value=value)
 
 
 def _resolve_output_path(rule: TemplateMultiLinkRule, settings: TemplateMultiLinkSettings) -> str:
@@ -620,6 +653,17 @@ def _style_header(sheet, row_number: int, column_count: int) -> None:
 def _set_widths(sheet, widths: dict[str, int]) -> None:
     for column, width in widths.items():
         sheet.column_dimensions[column].width = width
+
+
+def _auto_fit_columns(sheet) -> None:
+    for column_number in range(1, sheet.max_column + 1):
+        max_length = 0
+        for row_number in range(1, sheet.max_row + 1):
+            text = _cell_to_text(sheet.cell(row=row_number, column=column_number).value)
+            if len(text) > max_length:
+                max_length = len(text)
+        width = min(max(max_length + 2, 10), 64)
+        sheet.column_dimensions[get_column_letter(column_number)].width = width
 
 
 def _cell_to_text(value: object) -> str:

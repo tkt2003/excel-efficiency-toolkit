@@ -262,6 +262,7 @@ def read_template_external_links(template_path: str) -> list[str]:
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
+        excel.EnableEvents = False
         excel.AskToUpdateLinks = False
         workbook = excel.Workbooks.Open(
             abs_template_path,

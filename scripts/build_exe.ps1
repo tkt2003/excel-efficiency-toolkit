@@ -2,10 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
-$AppName = -join @(
-    [char]0x0045, [char]0x0078, [char]0x0063, [char]0x0065, [char]0x006C,
-    [char]0x6548, [char]0x7387, [char]0x5DE5, [char]0x5177, [char]0x53F0
-)
+$AppName = "老头表格助手"
 
 python -m pip show pyinstaller *> $null
 if ($LASTEXITCODE -ne 0) {

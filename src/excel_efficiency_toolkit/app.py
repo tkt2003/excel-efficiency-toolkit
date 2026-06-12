@@ -68,7 +68,7 @@ from .workbook_merge_ops import merge_workbooks_to_existing_workbook
 class ExcelToolkitApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Excel 效率工具台")
+        self.root.title("老头表格助手")
         self.root.geometry("860x800")
         self.root.minsize(780, 760)
         self.bg_color = "#f5f6f8"
@@ -86,7 +86,7 @@ class ExcelToolkitApp:
 
         # 初始化自定义 logger
         self.logger = setup_logger(self.log_text)
-        self.logger.info("欢迎使用 Excel 效率工具台。程序已就绪。")
+        self.logger.info("欢迎使用 老头表格助手。程序已就绪。")
 
     def _create_header(self, parent):
         header = tk.Frame(parent, bg=self.bg_color)
@@ -94,7 +94,7 @@ class ExcelToolkitApp:
 
         tk.Label(
             header,
-            text="Excel 效率工具台",
+            text="老头表格助手",
             font=("Microsoft YaHei", 18, "bold"),
             fg=self.text_color,
             bg=self.bg_color,
@@ -1213,6 +1213,7 @@ class ExcelToolkitApp:
         self.btn_template_tb_report.config(state="disabled")
         try:
             try:
+                self._log_info("正在打开模板并扫描外部链接，请稍候……")
                 template_links = read_template_external_links(template_path)
             except Exception as e:
                 self._log_error(f"扫描模板外部链接失败：{e}")
@@ -1242,7 +1243,11 @@ class ExcelToolkitApp:
                 old_link_path = template_links[0]
                 self._log_info(f"模板只有 1 个外部链接，已自动选择：{old_link_path}")
             else:
-                old_link_path = self._ask_old_link_choice_no_grab(template_links)
+                old_link_path = self._ask_old_link_choice_no_grab(
+                    template_links,
+                    title="选择要替换的旧链接",
+                    prompt="模板存在多个外部链接，请选择要替换的旧链接：",
+                )
                 if not old_link_path:
                     self._log_info("用户已取消操作。")
                     return
@@ -1343,18 +1348,18 @@ class ExcelToolkitApp:
         finally:
             self.btn_template_tb_report.config(state="normal")
 
-    def _ask_old_link_choice_no_grab(self, link_paths):
+    def _ask_old_link_choice_no_grab(self, link_paths, title, prompt):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
         dialog = tk.Toplevel(self.root)
         dialog.withdraw()
-        dialog.title("选择要替换的旧链接")
+        dialog.title(title)
         dialog.resizable(False, False)
         dialog.transient(self.root)
 
         tk.Label(
             dialog,
-            text="模板存在多个外部链接，请选择要替换的旧链接：",
+            text=prompt,
             font=("Microsoft YaHei", 11),
             wraplength=520,
             justify="left",
@@ -1431,6 +1436,7 @@ class ExcelToolkitApp:
         self.btn_template_tb_report.config(state="disabled")
         try:
             try:
+                self._log_info("正在打开模板并扫描外部链接，请稍候……")
                 template_links = read_template_external_links(template_path)
             except Exception as e:
                 self._log_error(f"扫描模板外部链接失败：{e}")
@@ -1460,7 +1466,15 @@ class ExcelToolkitApp:
                 main_old_link = template_links[0]
                 self._log_info(f"模板只有 1 个外部链接，已作为主链接：{main_old_link}")
             else:
-                main_old_link = self._ask_old_link_choice_no_grab(template_links)
+                main_old_link = self._ask_old_link_choice_no_grab(
+                    template_links,
+                    title="选择主链接",
+                    prompt=(
+                        "模板存在多个外部链接，请选择主链接。\n\n"
+                        "主链接对应的新源文件数量，将决定生成多少份 Excel。\n"
+                        "其他链接可在后续规则表中按行填写；新链接留空则保持原链接不变。"
+                    ),
+                )
                 if not main_old_link:
                     self._log_info("用户已取消操作。")
                     return

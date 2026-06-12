@@ -49,18 +49,21 @@ def test_create_rule_workbook_writes_settings_rows_and_dynamic_link_columns(tmp_
         assert [rule_sheet.cell(row=1, column=column).value for column in range(1, 11)] == [
             "是否执行",
             "输出文件名",
-            "输出文件路径",
-            "主源文件路径",
-            "状态",
-            "说明",
             "旧链接 1",
             "新链接 1",
             "旧链接 2",
             "新链接 2",
+            "状态",
+            "说明",
+            "输出文件路径",
+            "主源文件路径",
         ]
+        assert rule_sheet.freeze_panes == "C2"
         assert rule_sheet["B2"].value == "single_公司1_批量生成.xlsx"
-        assert rule_sheet["H2"].value == str(single_1.resolve())
-        assert rule_sheet["J2"].value is None
+        assert rule_sheet["D2"].value == str(single_1.resolve())
+        assert rule_sheet["F2"].value is None
+        assert rule_sheet["I2"].value.endswith("single_公司1_批量生成.xlsx")
+        assert rule_sheet["J2"].value == str(single_1.resolve())
     finally:
         workbook.close()
 
@@ -99,7 +102,7 @@ def test_rule_workbook_output_filename_rules(tmp_path, suffix, template_name, ex
     workbook = load_workbook(rule_path)
     try:
         assert workbook[RULE_SHEET_NAME]["B2"].value == expected_name
-        assert workbook[RULE_SHEET_NAME]["C2"].value.endswith(expected_name)
+        assert workbook[RULE_SHEET_NAME]["G2"].value.endswith(expected_name)
     finally:
         workbook.close()
 
@@ -123,7 +126,7 @@ def test_read_rules_builds_multi_link_actions_and_skips_execute_no(tmp_path):
     )
     workbook = load_workbook(rule_path)
     sheet = workbook[RULE_SHEET_NAME]
-    sheet["J2"] = str(group_1)
+    sheet["F2"] = str(group_1)
     sheet["A3"] = "否"
     workbook.save(rule_path)
     workbook.close()
@@ -202,7 +205,7 @@ def test_temp_and_unsupported_main_source_files_are_skipped_when_creating_rule_w
     try:
         sheet = workbook[RULE_SHEET_NAME]
         assert sheet.max_row == 2
-        assert sheet["D2"].value == str(valid.resolve())
+        assert sheet["H2"].value == str(valid.resolve())
     finally:
         workbook.close()
 
@@ -269,3 +272,51 @@ def test_write_results_updates_rule_sheet_and_log_sheet(tmp_path):
         assert log_sheet["G2"].value == "已替换"
     finally:
         workbook.close()
+
+
+def test_read_rules_uses_headers_instead_of_fixed_columns(tmp_path):
+    template = tmp_path / "template.xlsx"
+    template.write_text("placeholder", encoding="utf-8")
+    single = tmp_path / "single_公司1.xlsx"
+    group = tmp_path / "group_公司1.xlsx"
+    single.write_text("placeholder", encoding="utf-8")
+    group.write_text("placeholder", encoding="utf-8")
+
+    rule_path = create_template_multi_link_rule_workbook(
+        template_path=str(template),
+        output_dir=str(tmp_path),
+        old_links=["old_single.xlsx", "old_group.xlsx"],
+        main_old_link="old_single.xlsx",
+        main_source_paths=[str(single)],
+    )
+
+    workbook = load_workbook(rule_path)
+    try:
+        sheet = workbook[RULE_SHEET_NAME]
+        status_value = sheet["G2"].value
+        message_value = sheet["H2"].value
+        output_path_value = sheet["I2"].value
+        main_source_value = sheet["J2"].value
+        sheet["G1"] = "输出文件路径"
+        sheet["G2"] = output_path_value
+        sheet["H1"] = "主源文件路径"
+        sheet["H2"] = main_source_value
+        sheet["I1"] = "状态"
+        sheet["I2"] = status_value
+        sheet["J1"] = "说明"
+        sheet["J2"] = message_value
+        sheet["K1"] = "备注"
+        sheet["K2"] = "测试列"
+        workbook.save(rule_path)
+    finally:
+        workbook.close()
+
+    settings = read_template_multi_link_settings(rule_path)
+    rules = read_template_multi_link_rules(rule_path)
+    actions = build_template_multi_link_actions(rules, settings)
+
+    assert len(rules) == 1
+    assert rules[0].output_path.endswith("single_公司1_批量生成.xlsx")
+    assert rules[0].main_source_path == str(single.resolve())
+    assert len(actions[0].replacements) == 1
+    assert actions[0].replacements[0].new_link_path == str(single.resolve())

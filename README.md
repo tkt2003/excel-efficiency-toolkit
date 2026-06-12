@@ -1,4 +1,4 @@
-# Excel 效率工具台
+# 老头表格助手
 
 基于 Python、Tkinter 和 pywin32 构建的轻量级 Excel 操作工具。
 
@@ -45,7 +45,7 @@ python -m src.excel_efficiency_toolkit.app
 ```
 
 ## 打包 Windows exe
-项目提供 PyInstaller 打包脚本，默认入口为 `run_app.py`，输出到 `dist/Excel效率工具台.exe`。
+项目提供 PyInstaller 打包脚本，默认入口为 `run_app.py`，输出到 `dist/老头表格助手.exe`。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
