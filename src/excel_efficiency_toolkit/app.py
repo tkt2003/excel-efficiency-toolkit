@@ -1,9 +1,10 @@
 import os
 import tkinter as tk
+from datetime import datetime
 from tkinter import filedialog, scrolledtext
 from .color_sum_ops import sum_current_sheet_by_fill_color, sum_matching_sheets_by_fill_color
 from .data_drill_ops import (
-    build_data_drill_records,
+    build_data_drill_range_records,
     build_unique_output_path,
     summarize_data_drill_records,
     write_data_drill_result_workbook,
@@ -62,6 +63,15 @@ from .table_ops import (
     parse_column_index,
     split_workbook_sheet_by_column,
     validate_row_numbers,
+)
+from .workbook_drill_ops import (
+    RESULT_SHEET_BASE_NAME,
+    build_unique_result_sheet_name,
+    is_multi_area_range,
+    normalize_range_address,
+    should_skip_history_result_sheet,
+    write_single_workbook_drill_result_to_com_sheet,
+    write_single_file_result_sheet,
 )
 from .workbook_merge_ops import merge_workbooks_to_existing_workbook
 
@@ -139,7 +149,7 @@ class ExcelToolkitApp:
             "模板生成 / 取数",
             [
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
-                ("数据穿透取数", "btn_data_drill", self.run_data_drill),
+                ("数据穿透查询", "btn_data_drill", self.run_data_drill),
                 ("按模板批量生成 Excel", "btn_template_tb_report", self.run_template_generate),
                 ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
             ],
@@ -1001,76 +1011,37 @@ class ExcelToolkitApp:
             self.btn_color_sum.config(state="normal")
 
     def run_data_drill(self):
-        """按钮回调函数，按当前活动 sheet 和选中单元格批量穿透读取源工作簿取值"""
-        self._log_info("数据穿透取数：开始操作。")
+        """统一入口：按当前活动工作表和选区执行单文件或多文件数据穿透查询"""
+        self._log_info("数据穿透查询：开始选择查询方式。")
         try:
-            context = self._get_active_excel_drill_context()
-            if not self._confirm_data_drill_context(context):
-                self._log_info("用户已取消操作。")
-                return
-
-            source_paths = filedialog.askopenfilenames(
-                title="请选择源 Excel 文件",
-                initialdir=context["output_dir"],
-                filetypes=[
-                    ("Excel 文件", "*.xlsx *.xlsm *.xls"),
-                    ("所有文件", "*.*"),
+            mode = self._ask_choice_no_grab(
+                "数据穿透查询",
+                "请选择数据穿透查询方式：\n\n"
+                "单文件数据穿透查询\n"
+                "适合：在当前工作簿内，汇总所有 sheet 同一单元格或同一区域的值。\n\n"
+                "多文件数据穿透查询\n"
+                "适合：从多个工作簿中，读取同名 sheet 同一单元格或同一区域的值。",
+                [
+                    ("单文件数据穿透查询", "single"),
+                    ("多文件数据穿透查询", "multi"),
                 ],
+                dialog_width=620,
+                wraplength=560,
             )
-            if not source_paths:
+            if mode is None:
                 self._log_info("用户已取消操作。")
                 return
 
             self.btn_data_drill.config(state="disabled")
-            output_path = build_unique_output_path(context["output_dir"])
-            self._log_info(
-                f"当前取数点：{context['sheet_name']}!{context['cell_address']}；"
-                f"源文件数量：{len(source_paths)}。"
-            )
-            records = build_data_drill_records(
-                source_paths=list(source_paths),
-                sheet_name=context["sheet_name"],
-                cell_address=context["cell_address"],
-                logger=self._flushing_logger(),
-            )
-            write_data_drill_result_workbook(
-                records=records,
-                output_path=output_path,
-                source_sheet_name=context["sheet_name"],
-                cell_address=context["cell_address"],
-            )
-            summary = summarize_data_drill_records(records)
-
-            try:
-                os.startfile(output_path)
-                self._log_info(f"结果文件已生成并尝试打开：{output_path}")
-            except Exception as open_error:
-                self._log_error(f"结果文件已生成，但自动打开失败：{open_error}")
-                self._log_info(f"请手动打开结果文件：{output_path}")
-
-            self._log_info(
-                "数据穿透取数完成："
-                f"成功 {summary['success_count']} 个；"
-                f"跳过 {summary['skipped_count']} 个；"
-                f"失败 {summary['failed_count']} 个。"
-            )
-            self._log_info("当前活动工作簿未被修改、未被保存。")
-            self._show_info_no_grab(
-                "数据穿透取数",
-                "数据穿透取数完成。\n"
-                f"成功数量：{summary['success_count']}\n"
-                f"跳过数量：{summary['skipped_count']}\n"
-                f"失败数量：{summary['failed_count']}\n"
-                f"结果文件路径：{output_path}\n\n"
-                "当前活动工作簿未被修改、未被保存。",
-                dialog_width=560,
-                wraplength=500,
-            )
+            if mode == "single":
+                self._run_single_workbook_data_drill()
+            elif mode == "multi":
+                self._run_multi_workbook_data_drill()
         except Exception as e:
-            self._log_error(f"数据穿透取数失败：{type(e).__name__}: {e}")
+            self._log_error(f"数据穿透查询失败：{type(e).__name__}: {e}")
             self._show_info_no_grab(
-                "数据穿透取数",
-                f"数据穿透取数失败：{e}",
+                "数据穿透查询",
+                f"数据穿透查询失败：{e}",
                 dialog_width=520,
                 wraplength=460,
             )
@@ -1695,13 +1666,13 @@ class ExcelToolkitApp:
 
     def _confirm_data_drill_context(self, context):
         choice = self._ask_choice_no_grab(
-            "数据穿透取数",
+            "数据穿透查询",
             "请确认当前取数点：\n"
             f"当前工作簿名：{context['workbook_name']}\n"
-            f"当前工作簿路径：{context['workbook_path']}\n"
+            f"当前工作簿路径：{context['workbook_path_text']}\n"
             f"当前 Sheet 名：{context['sheet_name']}\n"
-            f"当前单元格地址：{context['cell_address']}\n"
-            f"即将读取各源文件中的：{context['sheet_name']}!{context['cell_address']}\n\n"
+            f"当前选区：{context['range_address']}\n"
+            f"即将读取各源文件中的：{context['sheet_name']}!{context['range_address']}\n\n"
             "结果文件将生成到当前工作簿同目录。\n"
             "当前工作簿不会被修改或保存。",
             [("继续选择源文件", "continue")],
@@ -1711,9 +1682,81 @@ class ExcelToolkitApp:
         return choice == "continue"
 
     def _get_current_excel_context_for_data_drill(self):
-        return self._get_active_excel_drill_context()
+        return self._get_active_excel_drill_context(require_saved_workbook=True)
 
-    def _get_active_excel_drill_context(self):
+    def _run_single_workbook_data_drill(self):
+        self._log_info("数据穿透查询（单文件）：开始操作。")
+        self._run_excel_data_drill_in_com_session(self._execute_single_workbook_data_drill)
+
+    def _run_multi_workbook_data_drill(self):
+        self._log_info("数据穿透查询（多文件）：开始操作。")
+        context = self._get_active_excel_drill_context(require_saved_workbook=True)
+        if not self._confirm_data_drill_context(context):
+            self._log_info("用户已取消操作。")
+            return
+
+        source_paths = filedialog.askopenfilenames(
+            title="请选择源 Excel 文件",
+            initialdir=context["output_dir"],
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not source_paths:
+            self._log_info("用户已取消操作。")
+            return
+
+        output_path = build_unique_output_path(context["output_dir"], base_name=RESULT_SHEET_BASE_NAME)
+        self._log_info(f"当前工作表：{context['sheet_name']}")
+        self._log_info(f"当前选区：{context['range_address']}")
+        self._log_info(f"源文件数量：{len(source_paths)}")
+        records = build_data_drill_range_records(
+            source_paths=list(source_paths),
+            sheet_name=context["sheet_name"],
+            range_address=context["range_address"],
+            logger=self._flushing_logger(),
+        )
+        write_data_drill_result_workbook(
+            records=records,
+            output_path=output_path,
+            source_sheet_name=context["sheet_name"],
+            cell_address=context["range_address"],
+        )
+        summary = summarize_data_drill_records(records)
+
+        try:
+            os.startfile(output_path)
+            self._log_info(f"结果文件已生成并尝试打开：{output_path}")
+        except Exception as open_error:
+            self._log_error(f"结果文件已生成，但自动打开失败：{open_error}")
+            self._log_info(f"请手动打开结果文件：{output_path}")
+
+        self._log_info(f"输出文件：{output_path}")
+        self._log_info("数据穿透查询（多文件）完成。")
+        self._log_info(
+            "数据穿透查询（多文件）统计："
+            f"成功 {summary['success_count']} 个；"
+            f"跳过 {summary['skipped_count']} 个；"
+            f"失败 {summary['failed_count']} 个。"
+        )
+        self._log_info("当前活动工作簿和源文件均未被修改、未被自动保存。")
+        self._show_info_no_grab(
+            "数据穿透查询（多文件）",
+            "数据穿透查询（多文件）完成。\n"
+            f"当前工作表：{context['sheet_name']}\n"
+            f"当前选区：{context['range_address']}\n"
+            f"源文件数量：{len(source_paths)}\n"
+            f"成功数量：{summary['success_count']}\n"
+            f"跳过数量：{summary['skipped_count']}\n"
+            f"失败数量：{summary['failed_count']}\n"
+            f"输出文件：{output_path}\n\n"
+            "当前活动工作簿和源文件均未被修改、未被自动保存。",
+            dialog_width=640,
+            wraplength=580,
+        )
+
+    def _get_active_excel_drill_context(self, require_saved_workbook: bool):
         try:
             import pythoncom
             import win32com.client
@@ -1748,14 +1791,15 @@ class ExcelToolkitApp:
 
             workbook_name = str(workbook.Name)
             workbook_dir = str(workbook.Path or "").strip()
-            if not workbook_dir:
+            if require_saved_workbook and not workbook_dir:
                 raise RuntimeError(
                     "当前活动工作簿尚未保存，无法确定结果文件输出目录。请先保存当前工作簿后重试。"
                     f"当前步骤：{self._format_data_drill_context_steps(steps)}。"
                 )
             workbook_path = str(workbook.FullName or "").strip()
-            if not os.path.dirname(workbook_path):
+            if workbook_path and not os.path.dirname(workbook_path) and workbook_dir:
                 workbook_path = os.path.join(workbook_dir, workbook_name)
+            workbook_path_text = workbook_path or workbook_name
             steps.append("已取得工作簿保存路径")
 
             try:
@@ -1770,91 +1814,152 @@ class ExcelToolkitApp:
                 raise RuntimeError(
                     "无法读取当前活动 Sheet，请先切换到目标工作表后重试。"
                     f"当前步骤：{self._format_data_drill_context_steps(steps)}。"
-                )
+                 )
             steps.append("已取得 ActiveSheet")
 
-            cell_address = self._get_active_cell_address_for_data_drill(excel)
-            if not cell_address:
+            range_address = self._get_active_range_address_for_data_drill(excel)
+            if not range_address:
                 raise RuntimeError(
-                    "没有有效选区，请先选中一个需要追查的单元格后重试。"
+                    "没有有效选区，请先选中一个需要追查的单元格或区域后重试。"
                     f"当前步骤：{self._format_data_drill_context_steps(steps)}，但未取得 ActiveCell 或可用 Selection。"
                 )
-            steps.append("已取得 ActiveCell")
+            steps.append("已取得 Selection")
 
             return {
                 "workbook_name": workbook_name,
                 "workbook_path": workbook_path,
+                "workbook_path_text": workbook_path_text,
                 "output_dir": workbook_dir,
                 "workbook_dir": workbook_dir,
                 "sheet_name": sheet_name,
-                "cell_address": cell_address,
+                "range_address": range_address,
             }
         finally:
             pythoncom.CoUninitialize()
 
-    def _get_active_cell_address_for_data_drill(self, excel):
-        active_cell_error = None
-        try:
-            active_cell = excel.ActiveCell
-            cell_address = self._get_cell_address_for_data_drill(active_cell)
-            if cell_address:
-                return cell_address
-        except Exception as e:
-            active_cell_error = e
-
+    def _get_active_range_address_for_data_drill(self, excel):
         try:
             selection = excel.Selection
         except Exception as e:
-            detail = f"已连接 Excel，但未取得 ActiveCell，也无法读取 Selection：{e}"
-            if active_cell_error is not None:
-                detail = f"已连接 Excel，但未取得 ActiveCell：{active_cell_error}；无法读取 Selection：{e}"
-            raise RuntimeError(detail) from e
+            raise RuntimeError(f"已连接 Excel，但无法读取当前 Selection：{e}") from e
 
-        cell_address = self._get_selection_cell_address_for_data_drill(selection)
-        if cell_address:
-            return cell_address
-
-        detail = "已连接 Excel，但未取得 ActiveCell；Selection 不是可识别的单元格区域。"
-        if active_cell_error is not None:
-            detail = f"已连接 Excel，但未取得 ActiveCell：{active_cell_error}；Selection 不是可识别的单元格区域。"
-        raise RuntimeError(detail)
-
-    def _get_selection_cell_address_for_data_drill(self, selection):
         if selection is None:
-            return None
-
-        cell_candidates = [
-            lambda: selection.Cells(1, 1),
-            lambda: selection.Cells.Item(1, 1),
-            lambda: selection.Areas(1).Cells(1, 1),
-            lambda: selection.Item(1, 1),
-            lambda: selection,
-        ]
-        for get_cell in cell_candidates:
-            try:
-                cell_address = self._get_cell_address_for_data_drill(get_cell())
-                if cell_address:
-                    return self._left_top_cell_address(cell_address)
-            except Exception:
-                continue
-        return None
-
-    def _get_cell_address_for_data_drill(self, cell):
-        if cell is None:
-            return None
+            raise RuntimeError("已连接 Excel，但当前没有可识别的选区。")
         try:
-            address_member = cell.Address
+            areas = selection.Areas.Count
+        except Exception:
+            areas = 1
+        if areas and int(areas) > 1:
+            raise RuntimeError("不支持多区域选区，请只选择一个连续区域后重试。")
+
+        try:
+            address_member = selection.Address
             if callable(address_member):
                 address = address_member(False, False)
             else:
                 address = address_member
         except Exception:
-            address = cell.Address(False, False)
-        return self._left_top_cell_address(address)
+            address = selection.Address(False, False)
+        normalized_address = normalize_range_address(address)
+        if is_multi_area_range(normalized_address):
+            raise RuntimeError("不支持多区域选区，请只选择一个连续区域后重试。")
+        return normalized_address
 
-    def _left_top_cell_address(self, address):
-        first_area = str(address or "").split(",")[0].strip()
-        return first_area.split(":")[0].replace("$", "").strip()
+    def _run_excel_data_drill_in_com_session(self, runner):
+        try:
+            import pythoncom
+            import win32com.client
+        except Exception as e:
+            raise RuntimeError("无法加载 Excel COM 组件，请确认已安装 pywin32 并在 Windows + Excel 环境运行。") from e
+
+        pythoncom.CoInitialize()
+        try:
+            try:
+                excel = win32com.client.GetActiveObject("Excel.Application")
+            except Exception as e:
+                raise RuntimeError("未检测到正在运行的 Excel，请先打开目标/合并工作簿后重试。") from e
+            runner(excel)
+        finally:
+            pythoncom.CoUninitialize()
+
+    def _execute_single_workbook_data_drill(self, excel):
+        workbook = excel.ActiveWorkbook
+        if workbook is None:
+            raise RuntimeError("Excel 中没有活动工作簿，请先打开目标工作簿后重试。")
+
+        active_sheet = excel.ActiveSheet
+        if active_sheet is None or not str(active_sheet.Name):
+            raise RuntimeError("无法读取当前活动 Sheet，请先切换到目标工作表后重试。")
+
+        range_address = self._get_active_range_address_for_data_drill(excel)
+        workbook_name = str(workbook.Name)
+        workbook_path = str(workbook.FullName or "").strip()
+        workbook_path_text = workbook_path or workbook_name
+        sheet_name = str(active_sheet.Name)
+
+        self._log_info(f"当前工作簿：{workbook_path_text}")
+        self._log_info(f"当前工作表：{sheet_name}")
+        self._log_info(f"当前选区：{range_address}")
+
+        records = []
+        visible_sheet_count = 0
+        for sheet in workbook.Worksheets:
+            visible_status = "可见" if not is_sheet_hidden_by_visible_value(sheet.Visible) else "隐藏"
+            if visible_status != "可见":
+                continue
+            if should_skip_history_result_sheet(str(sheet.Name), RESULT_SHEET_BASE_NAME):
+                continue
+
+            visible_sheet_count += 1
+            values_by_address = self._read_excel_range_values_from_com_sheet(sheet, range_address)
+            records.append(
+                {
+                    "sheet_name": str(sheet.Name),
+                    "visible_status": visible_status,
+                    "values_by_address": values_by_address,
+                }
+            )
+
+        result_sheet_name = build_unique_result_sheet_name([str(sheet.Name) for sheet in workbook.Worksheets])
+        result_sheet = workbook.Worksheets.Add(After=workbook.Worksheets(workbook.Worksheets.Count))
+        result_sheet.Name = result_sheet_name
+        write_single_workbook_drill_result_to_com_sheet(
+            sheet=result_sheet,
+            base_sheet_name=sheet_name,
+            range_address=range_address,
+            created_at_text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            records=records,
+        )
+
+        self._log_info(f"读取工作表数量：{visible_sheet_count}")
+        self._log_info(f"结果工作表：{result_sheet_name}")
+        self._log_info("数据穿透查询（单文件）完成。")
+        self._log_info("当前活动工作簿已新增结果工作表，但未自动保存。")
+        self._show_info_no_grab(
+            "数据穿透查询（单文件）",
+            "数据穿透查询（单文件）完成。\n"
+            f"当前工作簿：{workbook_path_text}\n"
+            f"当前工作表：{sheet_name}\n"
+            f"当前选区：{range_address}\n"
+            f"读取工作表数量：{visible_sheet_count}\n"
+            f"结果工作表：{result_sheet_name}\n\n"
+            "当前活动工作簿未自动保存。",
+            dialog_width=620,
+            wraplength=560,
+        )
+
+    def _read_excel_range_values_from_com_sheet(self, sheet, range_address: str) -> dict:
+        try:
+            raw_value = sheet.Range(range_address).Value
+            from .workbook_drill_ops import range_value_to_address_map
+
+            return range_value_to_address_map(range_address, raw_value)
+        except Exception as e:
+            message = f"读取异常：{e}"
+            self._log_error(f"{sheet.Name}!{range_address} 读取失败：{message}")
+            from .workbook_drill_ops import expand_range_addresses
+
+            return {address: message for address in expand_range_addresses(range_address)}
 
     def _format_data_drill_context_steps(self, steps):
         return "、".join(steps) if steps else "尚未连接 Excel"

@@ -1,34 +1,18 @@
 import os
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.utils.cell import coordinate_to_tuple
+
+from .workbook_drill_ops import (
+    RESULT_SHEET_BASE_NAME,
+    is_excel_error_text,
+    normalize_range_address,
+    range_value_to_address_map,
+    write_multi_file_result_sheet,
+)
 
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xlsm"}
-RESULT_SHEET_NAME = "数据穿透结果"
-RESULT_HEADERS = [
-    "序号",
-    "源文件名",
-    "源文件路径",
-    "目标 Sheet 名",
-    "单元格地址",
-    "取值",
-    "是否为空",
-    "是否错误值",
-    "状态",
-    "说明",
-]
-EXCEL_ERROR_VALUES = {
-    "#VALUE!",
-    "#DIV/0!",
-    "#REF!",
-    "#NAME?",
-    "#N/A",
-    "#NULL!",
-    "#NUM!",
-}
-
-
+RESULT_SHEET_NAME = RESULT_SHEET_BASE_NAME
 def is_supported_openpyxl_workbook(path: str) -> bool:
     return os.path.splitext(str(path))[1].lower() in SUPPORTED_EXTENSIONS
 
@@ -73,13 +57,16 @@ def resolve_sheet_name(workbook, target_sheet_name: str) -> tuple[str | None, li
 
 
 def is_excel_error_value(value) -> bool:
-    return isinstance(value, str) and value.strip() in EXCEL_ERROR_VALUES
+    return is_excel_error_text(value)
 
 
 def read_drill_cell_from_workbook(source_path: str, sheet_name: str, cell_address: str) -> dict:
+    return read_drill_range_from_workbook(source_path, sheet_name, cell_address)
+
+
+def read_drill_range_from_workbook(source_path: str, sheet_name: str, range_address: str) -> dict:
     source_path = os.path.abspath(str(source_path))
-    filename = os.path.basename(source_path)
-    record = _new_record(source_path, sheet_name, cell_address)
+    record = _new_record(source_path, sheet_name, range_address)
 
     skip_message = _get_source_skip_message(source_path)
     if skip_message is not None:
@@ -98,22 +85,24 @@ def read_drill_cell_from_workbook(source_path: str, sheet_name: str, cell_addres
 
         value_sheet = value_workbook[actual_sheet_name]
         formula_sheet = formula_workbook[actual_sheet_name]
-        row_index, column_index = coordinate_to_tuple(str(cell_address).replace("$", "").strip())
-        cell_missing = row_index > value_sheet.max_row or column_index > value_sheet.max_column
-        value = _read_cell_value(value_sheet, row_index, column_index)
-        formula_value = _read_cell_value(formula_sheet, row_index, column_index)
+        normalized_range_address = normalize_range_address(range_address)
+        value = _read_range_value(value_sheet, normalized_range_address)
+        formula_value = _read_range_value(formula_sheet, normalized_range_address)
+        values_by_address = range_value_to_address_map(normalized_range_address, value)
+        formula_values_by_address = range_value_to_address_map(normalized_range_address, formula_value)
+        cell_address = normalize_range_address(range_address).split(":")[0]
+        record["values_by_address"] = values_by_address
+        record["value"] = values_by_address.get(cell_address)
 
-        if _is_formula_value(formula_value) and value is None:
+        if _has_formula_without_cached_value(values_by_address, formula_values_by_address):
             return _finish_record(
                 record,
-                value,
+                record["value"],
                 "成功",
                 "公式缓存为空，取值可能需要先打开源文件计算并保存",
             )
-        if cell_missing:
-            return _finish_record(record, None, "成功", "源文件缺少指定单元格，已按空值记录")
 
-        return _finish_record(record, value, "成功", "读取成功")
+        return _finish_record(record, record["value"], "成功", "读取成功")
     except Exception as e:
         return _finish_record(record, None, "失败", f"读取异常：{e}")
     finally:
@@ -124,10 +113,14 @@ def read_drill_cell_from_workbook(source_path: str, sheet_name: str, cell_addres
 
 
 def build_data_drill_records(source_paths: list[str], sheet_name: str, cell_address: str, logger=None) -> list[dict]:
+    return build_data_drill_range_records(source_paths, sheet_name, cell_address, logger=logger)
+
+
+def build_data_drill_range_records(source_paths: list[str], sheet_name: str, range_address: str, logger=None) -> list[dict]:
     records = []
     for index, source_path in enumerate(source_paths, start=1):
         _log(logger, "info", f"正在读取源文件 {index}/{len(source_paths)}：{source_path}")
-        record = read_drill_cell_from_workbook(source_path, sheet_name, cell_address)
+        record = read_drill_range_from_workbook(source_path, sheet_name, range_address)
         records.append(record)
         _log(logger, "info", f"{record['source_file_name']}：{record['status']}，{record['message']}")
     return records
@@ -155,24 +148,7 @@ def write_data_drill_result_workbook(
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = RESULT_SHEET_NAME
-    sheet.append(RESULT_HEADERS)
-
-    for index, record in enumerate(records, start=1):
-        value = record.get("value")
-        sheet.append(
-            [
-                index,
-                record.get("source_file_name", ""),
-                record.get("source_file_path", ""),
-                record.get("target_sheet_name", source_sheet_name),
-                record.get("cell_address", cell_address),
-                value,
-                "是" if _is_empty_value(value) else "否",
-                "是" if is_excel_error_value(value) else "否",
-                record.get("status", ""),
-                record.get("message", ""),
-            ]
-        )
+    write_multi_file_result_sheet(sheet, records, cell_address)
 
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
@@ -197,12 +173,15 @@ def _get_source_skip_message(source_path: str) -> str | None:
 
 
 def _new_record(source_path: str, sheet_name: str, cell_address: str) -> dict:
+    normalized_address = normalize_range_address(cell_address)
     return {
         "source_file_name": os.path.basename(source_path),
         "source_file_path": source_path,
         "target_sheet_name": sheet_name,
-        "cell_address": str(cell_address).replace("$", "").strip(),
+        "cell_address": normalized_address.split(":")[0],
+        "range_address": normalized_address,
         "value": None,
+        "values_by_address": {},
         "status": "",
         "message": "",
     }
@@ -217,20 +196,24 @@ def _finish_record(record: dict, value, status: str, message: str) -> dict:
     return record
 
 
-def _read_cell_value(sheet, row_index: int, column_index: int):
-    for row_values in sheet.iter_rows(
-        min_row=row_index,
-        max_row=row_index,
-        min_col=column_index,
-        max_col=column_index,
-        values_only=True,
-    ):
-        return row_values[0] if row_values else None
-    return None
-
-
 def _is_formula_value(value) -> bool:
     return isinstance(value, str) and value.startswith("=")
+
+
+def _read_range_value(sheet, range_address: str):
+    cells = sheet[range_address]
+    if isinstance(cells, tuple):
+        if cells and isinstance(cells[0], tuple):
+            return tuple(tuple(cell.value for cell in row) for row in cells)
+        return cells[0].value if cells else None
+    return cells.value
+
+
+def _has_formula_without_cached_value(values_by_address: dict[str, object], formula_values_by_address: dict[str, object]) -> bool:
+    for address, formula_value in formula_values_by_address.items():
+        if _is_formula_value(formula_value) and values_by_address.get(address) is None:
+            return True
+    return False
 
 
 def _is_empty_value(value) -> bool:
@@ -238,20 +221,18 @@ def _is_empty_value(value) -> bool:
 
 
 def _set_result_column_widths(sheet) -> None:
-    widths = {
-        "A": 8,
-        "B": 24,
-        "C": 52,
-        "D": 18,
-        "E": 14,
-        "F": 18,
-        "G": 10,
-        "H": 12,
-        "I": 10,
-        "J": 48,
-    }
-    for column, width in widths.items():
-        sheet.column_dimensions[column].width = width
+    widths = [24, 52, 18]
+    for column_index, width in enumerate(widths, start=1):
+        column_letter = chr(64 + column_index)
+        sheet.column_dimensions[column_letter].width = width
+
+    if sheet.max_column >= 5:
+        for column_index in range(4, sheet.max_column - 1):
+            column_letter = _column_index_to_letter(column_index)
+            sheet.column_dimensions[column_letter].width = 14
+
+    sheet.column_dimensions[_column_index_to_letter(sheet.max_column - 1)].width = 10
+    sheet.column_dimensions[_column_index_to_letter(sheet.max_column)].width = 48
 
 
 def _log(logger, level: str, message: str) -> None:
@@ -261,3 +242,12 @@ def _log(logger, level: str, message: str) -> None:
     if log_func is None:
         return
     log_func(message)
+
+
+def _column_index_to_letter(column_index: int) -> str:
+    result = ""
+    current = column_index
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
