@@ -47,6 +47,10 @@ from .report_generate_ops import (
     generate_reports_from_checklist,
 )
 from .round_formula_ops import round_selected_range_to_two_decimals
+from .template_multi_link_ops import (
+    create_template_multi_link_rule_workbook,
+    execute_template_multi_link_generation_from_rule_workbook,
+)
 from .template_tb_report_ops import (
     DEFAULT_OUTPUT_NAME_SUFFIX,
     generate_reports_from_template_and_tb_files,
@@ -138,6 +142,7 @@ class ExcelToolkitApp:
                 ("数据穿透取数", "btn_data_drill", self.run_data_drill),
                 ("按清单生成报表", "btn_report_generate", self.run_report_generate),
                 ("按模板批量生成 Excel", "btn_template_tb_report", self.run_template_tb_report),
+                ("按模板多链接生成 Excel", "btn_template_multi_link", self.run_template_multi_link),
                 ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
             ],
         )
@@ -1379,6 +1384,232 @@ class ExcelToolkitApp:
         self._show_dialog_no_grab(dialog, min_width=580)
         self.root.wait_variable(done)
         return result["value"]
+
+    def run_template_multi_link(self):
+        self._log_info("按模板多链接生成 Excel：开始操作。")
+        template_path = filedialog.askopenfilename(
+            title="请选择模板 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not template_path:
+            self._log_info("用户已取消操作。")
+            return
+
+        self.btn_template_multi_link.config(state="disabled")
+        try:
+            try:
+                template_links = read_template_external_links(template_path)
+            except Exception as e:
+                self._log_error(f"扫描模板外部链接失败：{e}")
+                self._show_info_no_grab(
+                    "按模板多链接生成 Excel",
+                    f"扫描模板外部链接失败：{e}",
+                    dialog_width=560,
+                    wraplength=500,
+                )
+                return
+
+            if not template_links:
+                self._log_error("模板没有外部链接，无法生成多链接规则表。")
+                self._show_info_no_grab(
+                    "按模板多链接生成 Excel",
+                    "模板没有外部链接，无法生成多链接规则表。\n请确认模板含有引用其他工作簿的公式后重试。",
+                    dialog_width=540,
+                    wraplength=480,
+                )
+                return
+
+            self._log_info(f"模板外部链接数量：{len(template_links)}")
+            for link_path in template_links:
+                self._log_info(f"  - {link_path}")
+
+            if len(template_links) == 1:
+                main_old_link = template_links[0]
+                self._log_info(f"模板只有 1 个外部链接，已作为主链接：{main_old_link}")
+            else:
+                main_old_link = self._ask_old_link_choice_no_grab(template_links)
+                if not main_old_link:
+                    self._log_info("用户已取消操作。")
+                    return
+                self._log_info(f"用户选择主链接：{main_old_link}")
+
+            main_source_paths = filedialog.askopenfilenames(
+                title="请多选主链接对应的新源文件",
+                filetypes=[
+                    ("Excel 文件", "*.xlsx *.xlsm"),
+                    ("所有文件", "*.*"),
+                ],
+            )
+            if not main_source_paths:
+                self._log_info("用户已取消操作。")
+                return
+
+            suffix_input = self._ask_text_no_grab(
+                "按模板多链接生成 Excel",
+                "请输入输出文件名后缀，留空则直接使用主源文件名主体。\n"
+                "常用：_批量生成、_附注、_财务报表、_底稿、_报表",
+                default=DEFAULT_OUTPUT_NAME_SUFFIX,
+                entry_width=24,
+                dialog_width=500,
+                wraplength=440,
+            )
+            if suffix_input is None:
+                self._log_info("用户已取消操作。")
+                return
+            output_name_suffix = suffix_input.strip()
+
+            output_dir = filedialog.askdirectory(title="请选择输出目录")
+            if not output_dir:
+                self._log_info("用户已取消操作。")
+                return
+
+            self._log_info(f"主源文件数量：{len(main_source_paths)}")
+            self._log_info(f"输出目录：{output_dir}")
+            self._log_info(f"输出后缀：{output_name_suffix or '（留空）'}")
+            rule_path = create_template_multi_link_rule_workbook(
+                template_path=template_path,
+                output_dir=output_dir,
+                old_links=list(template_links),
+                main_old_link=main_old_link,
+                main_source_paths=list(main_source_paths),
+                output_name_suffix=output_name_suffix,
+            )
+            self._log_info(f"多链接生成规则表路径：{rule_path}")
+
+            try:
+                os.startfile(rule_path)
+                self._log_info("规则表已自动打开。请检查并填写其他新链接列，保存并关闭规则表后点击执行。")
+            except Exception as open_error:
+                self._log_error(f"规则表已生成，但自动打开失败：{open_error}")
+                self._log_info(f"请手动打开规则表：{rule_path}")
+
+            if not self._confirm_template_multi_link_rule_ready(rule_path):
+                self._log_info("用户已取消操作。")
+        except Exception as e:
+            self._log_error(f"按模板多链接生成 Excel失败：{type(e).__name__}: {e}")
+            self._show_info_no_grab(
+                "按模板多链接生成 Excel",
+                f"按模板多链接生成 Excel失败：{e}",
+                dialog_width=560,
+                wraplength=500,
+            )
+        finally:
+            self.btn_template_multi_link.config(state="normal")
+
+    def _confirm_template_multi_link_rule_ready(self, rule_workbook_path):
+        result = {"execute": False}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("按模板多链接生成 Excel")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=(
+                "规则表已打开。\n"
+                "请检查【生成清单】，按需填写其他旧链接对应的新链接列；\n"
+                "新链接留空表示不替换该旧链接。\n"
+                "保存并关闭/释放规则表后，再点击执行。"
+            ),
+            font=("Microsoft YaHei", 11),
+            wraplength=460,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+
+        def execute():
+            execute_button.config(state="disabled")
+            try:
+                self._log_info(f"正在执行多链接生成规则表：{rule_workbook_path}")
+                try:
+                    summary = execute_template_multi_link_generation_from_rule_workbook(
+                        rule_workbook_path,
+                        logger=self._flushing_logger(),
+                    )
+                except (PermissionError, OSError) as e:
+                    self._log_error(f"规则表无法读取或回写：{e}")
+                    self._show_template_multi_link_rule_workbook_busy_message()
+                    return
+
+                result_message = (
+                    "按模板多链接生成 Excel 完成。\n"
+                    f"规则行数：{summary['rule_count']}\n"
+                    f"成功：{summary['success_count']} 个\n"
+                    f"跳过：{summary['skipped_count']} 个\n"
+                    f"失败：{summary['failed_count']} 个\n\n"
+                    "规则表已更新状态和处理日志。\n"
+                    "原模板工作簿未被修改。"
+                )
+                self._log_info(
+                    "按模板多链接生成 Excel完成："
+                    f"成功 {summary['success_count']} 个；"
+                    f"跳过 {summary['skipped_count']} 个；"
+                    f"失败 {summary['failed_count']} 个。"
+                )
+                self._show_info_no_grab(
+                    "按模板多链接生成 Excel",
+                    result_message,
+                    dialog_width=540,
+                    wraplength=480,
+                )
+                result["execute"] = True
+                done.set(True)
+                dialog.destroy()
+            except Exception as e:
+                self._log_error(f"按模板多链接生成 Excel失败：{e}")
+                self._show_info_no_grab(
+                    "按模板多链接生成 Excel",
+                    f"按模板多链接生成 Excel失败：{e}",
+                    dialog_width=540,
+                    wraplength=480,
+                )
+            finally:
+                if dialog.winfo_exists():
+                    execute_button.config(state="normal")
+
+        def cancel():
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT)
+        execute_button = tk.Button(
+            button_frame,
+            text="我已检查规则，开始生成",
+            command=execute,
+            font=("Microsoft YaHei", 10),
+            width=24,
+        )
+        execute_button.pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        self._show_dialog_no_grab(dialog, min_width=540, min_height=210)
+        self.root.wait_variable(done)
+        return result["execute"]
+
+    def _show_template_multi_link_rule_workbook_busy_message(self):
+        self._log_error("规则表仍被 Excel 占用，无法继续执行。请保存并关闭规则表后重试。")
+        self._show_info_no_grab(
+            "按模板多链接生成 Excel",
+            "规则表仍被 Excel 占用，无法读取或回写。\n"
+            "请先保存并关闭规则表，再点击执行。",
+            dialog_width=500,
+            wraplength=440,
+        )
 
     def run_round_formula(self):
         """按钮回调函数，将当前 Excel 选区内数值/公式直接包裹 ROUND(...,2)"""
