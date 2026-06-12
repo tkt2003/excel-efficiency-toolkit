@@ -6,14 +6,18 @@ from openpyxl.styles import PatternFill
 
 from src.excel_efficiency_toolkit import clear_by_color_ops
 from src.excel_efficiency_toolkit.clear_by_color_ops import (
+    apply_multi_workbook_backup_plan,
+    build_clear_by_color_batch_backup_dir,
     build_clear_by_color_backup_path,
     build_clear_detail_log_record,
     build_clear_ranges_from_cells,
     build_sheet_clear_plans,
     build_clear_summary_log_record,
+    build_unique_backup_file_path,
     clear_workbook_file_with_openpyxl,
     clear_loaded_workbook_cells,
     execute_clear_active_workbook_plan,
+    get_multi_workbook_backup_candidates,
     get_load_workbook_options_for_color_clear,
     is_supported_openpyxl_color_workbook,
     resolve_multi_workbook_save_mode,
@@ -94,6 +98,22 @@ def test_build_clear_by_color_backup_path_does_not_overwrite(tmp_path):
     second = build_clear_by_color_backup_path(str(target_path), timestamp="20260612_120000")
 
     assert first != second
+
+
+def test_build_clear_by_color_batch_backup_dir_uses_expected_name(tmp_path):
+    backup_dir = build_clear_by_color_batch_backup_dir(str(tmp_path), timestamp="20260613_001530")
+    assert backup_dir == str(tmp_path / "按颜色清空内容_备份_20260613_001530")
+
+
+def test_build_unique_backup_file_path_auto_numbers_same_name(tmp_path):
+    batch_dir = tmp_path / "backup"
+    batch_dir.mkdir()
+    first = build_unique_backup_file_path(str(batch_dir), "目标.xlsx")
+    Path(first).write_text("a", encoding="utf-8")
+    second = build_unique_backup_file_path(str(batch_dir), "目标.xlsx")
+
+    assert first != second
+    assert second.endswith("目标_2.xlsx")
 
 
 def test_scan_workbook_color_matches_finds_same_color_and_skips_hidden_sheet(tmp_path):
@@ -187,14 +207,16 @@ def test_build_clear_summary_log_record_structure_is_correct():
         2,
         10,
         8,
-        "D:/backup.xlsx",
         "com",
+        "批次备份",
+        "D:/backup.xlsx",
         "成功",
         "说明",
     )
     assert record["匹配工作表数量"] == 2
     assert record["清空单元格数量"] == 8
     assert record["保存方式"] == "com"
+    assert record["备份方式"] == "批次备份"
 
 
 def test_build_clear_detail_log_record_structure_is_correct():
@@ -206,7 +228,7 @@ def test_build_clear_detail_log_record_structure_is_correct():
 def test_write_clear_by_color_log_workbook_generates_file(tmp_path):
     log_path = write_clear_by_color_log_workbook(
         str(tmp_path),
-        [build_clear_summary_log_record("D:/a.xlsx", 1, 2, 2, "D:/bak.xlsx", "openpyxl", "成功", "完成")],
+        [build_clear_summary_log_record("D:/a.xlsx", 1, 2, 2, "openpyxl", "批次备份", "D:/bak.xlsx", "成功", "完成")],
         [build_clear_detail_log_record("D:/a.xlsx", "Sheet1", "A1", "成功", "")],
         timestamp="20260612_120000",
     )
@@ -214,8 +236,11 @@ def test_write_clear_by_color_log_workbook_generates_file(tmp_path):
     assert Path(log_path).exists()
     workbook = load_workbook(log_path)
     assert workbook.sheetnames == ["处理汇总", "处理明细"]
-    assert workbook["处理汇总"]["F1"].value == "保存方式"
-    assert workbook["处理汇总"]["F2"].value == "openpyxl"
+    assert workbook["处理汇总"]["E1"].value == "保存方式"
+    assert workbook["处理汇总"]["E2"].value == "openpyxl"
+    assert workbook["处理汇总"]["F1"].value == "备份方式"
+    assert workbook["处理汇总"]["F2"].value == "批次备份"
+    assert workbook["处理汇总"]["G1"].value == "备份路径"
     workbook.close()
 
 
@@ -258,6 +283,74 @@ def test_build_sheet_clear_plans_contains_contiguous_ranges():
 
     assert plans[0]["range_addresses"] == ["A2:B2", "D2"]
     assert plans[0]["range_count"] == 2
+
+
+def test_get_multi_workbook_backup_candidates_only_returns_files_that_will_be_modified():
+    records = [
+        {"file_path": "a.xlsx", "needs_modify": True},
+        {"file_path": "b.xlsx", "needs_modify": False},
+        {"file_path": "c.xls", "needs_modify": False},
+    ]
+
+    candidates = get_multi_workbook_backup_candidates(records)
+    assert [item["file_path"] for item in candidates] == ["a.xlsx"]
+
+
+def test_apply_multi_workbook_backup_plan_only_copies_files_that_will_be_modified(tmp_path):
+    file_a = tmp_path / "A.xlsx"
+    file_b = tmp_path / "B.xlsx"
+    file_c = tmp_path / "C.xls"
+    file_a.write_text("a", encoding="utf-8")
+    file_b.write_text("b", encoding="utf-8")
+    file_c.write_text("c", encoding="utf-8")
+    records = [
+        {"file_path": str(file_a), "file_name": "A.xlsx", "needs_modify": True, "backup_mode": "", "backup_path": ""},
+        {"file_path": str(file_b), "file_name": "B.xlsx", "needs_modify": False, "backup_mode": "无需备份", "backup_path": ""},
+        {"file_path": str(file_c), "file_name": "C.xls", "needs_modify": False, "backup_mode": "跳过", "backup_path": ""},
+    ]
+
+    batch_dir = apply_multi_workbook_backup_plan(records, str(tmp_path), skip_backup=False, timestamp="20260613_001530")
+
+    assert Path(batch_dir).exists()
+    assert Path(records[0]["backup_path"]).exists()
+    assert records[0]["backup_mode"] == "批次备份"
+    assert records[1]["backup_path"] == ""
+    assert records[2]["backup_path"] == ""
+    assert len(list(Path(batch_dir).iterdir())) == 1
+
+
+def test_apply_multi_workbook_backup_plan_respects_user_skip_backup(tmp_path):
+    file_a = tmp_path / "A.xlsx"
+    file_a.write_text("a", encoding="utf-8")
+    records = [
+        {"file_path": str(file_a), "file_name": "A.xlsx", "needs_modify": True, "backup_mode": "", "backup_path": ""},
+    ]
+
+    batch_dir = apply_multi_workbook_backup_plan(records, str(tmp_path), skip_backup=True, timestamp="20260613_001530")
+
+    assert batch_dir == ""
+    assert records[0]["backup_mode"] == "用户选择不备份"
+    assert records[0]["backup_path"] == "用户选择不备份"
+
+
+def test_apply_multi_workbook_backup_plan_auto_numbers_same_file_name(tmp_path):
+    first_dir = tmp_path / "one"
+    second_dir = tmp_path / "two"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    file_a = first_dir / "目标.xlsx"
+    file_b = second_dir / "目标.xlsx"
+    file_a.write_text("a", encoding="utf-8")
+    file_b.write_text("b", encoding="utf-8")
+    records = [
+        {"file_path": str(file_a), "file_name": file_a.name, "needs_modify": True, "backup_mode": "", "backup_path": ""},
+        {"file_path": str(file_b), "file_name": file_b.name, "needs_modify": True, "backup_mode": "", "backup_path": ""},
+    ]
+
+    batch_dir = apply_multi_workbook_backup_plan(records, str(tmp_path), skip_backup=False, timestamp="20260613_001530")
+
+    backup_names = sorted(path.name for path in Path(batch_dir).iterdir())
+    assert backup_names == ["目标.xlsx", "目标_2.xlsx"]
 
 
 def test_execute_clear_active_workbook_plan_does_not_call_openpyxl_save(monkeypatch):
@@ -315,3 +408,44 @@ def test_execute_clear_active_workbook_plan_does_not_call_openpyxl_save(monkeypa
     assert result["range_group_count"] == 2
     assert fake_workbook.sheet.ranges["A1:B1"].clear_count == 1
     assert fake_workbook.sheet.ranges["D1"].clear_count == 1
+
+
+def test_clear_multiple_workbooks_by_color_skip_backup_marks_summary(monkeypatch, tmp_path):
+    file_a = tmp_path / "A.xlsx"
+    file_a.write_text("a", encoding="utf-8")
+    monkeypatch.setattr(clear_by_color_ops, "prepare_active_fill_color_context", lambda logger=None: {
+        "workbook_name": "样本.xlsx",
+        "selected_sheet_name": "Sheet1",
+        "selected_cell_address": "A1",
+        "selected_color_key": ("solid", "rgb", "FFFF00", None, None, 0),
+        "current_color_text": "Interior.Color=65535",
+    })
+    monkeypatch.setattr(clear_by_color_ops, "collect_multi_workbook_clear_records", lambda paths, key, logger=None: [
+        {
+            "file_path": str(file_a),
+            "file_name": "A.xlsx",
+            "is_supported": True,
+            "has_external_links": False,
+            "matched_sheet_count": 1,
+            "matched_cell_count": 2,
+            "save_mode": "openpyxl",
+            "needs_modify": True,
+            "backup_mode": "",
+            "backup_path": "",
+            "status": "待处理",
+            "note": "",
+            "sheet_plans": [{"sheet_name": "Sheet1", "cells": ["A1", "B1"]}],
+            "sheet_clear_plans": [],
+        }
+    ])
+    monkeypatch.setattr(clear_by_color_ops, "clear_workbook_file_with_openpyxl", lambda *args, **kwargs: {
+        "cleared_cell_count": 2,
+        "skipped_merged_cell_count": 0,
+        "range_group_count": 0,
+    })
+
+    result = clear_by_color_ops.clear_multiple_workbooks_by_color([str(file_a)], skip_backup=True)
+
+    assert result["batch_backup_dir"] == ""
+    assert result["summary_records"][0]["备份方式"] == "用户选择不备份"
+    assert result["summary_records"][0]["备份路径"] == "用户选择不备份"

@@ -451,6 +451,64 @@ class ExcelToolkitApp:
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
         self._show_dialog_no_grab(dialog, min_width=dialog_width)
 
+    def _ask_clear_multi_backup_option_no_grab(self):
+        result = {"value": None}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("按颜色清空内容")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text=(
+                "多个工作簿模式默认会先扫描，再把实际会被修改的文件集中备份到一个批次备份文件夹。\n"
+                "无匹配、跳过或失败且未修改的文件不会备份。"
+            ),
+            font=("Microsoft YaHei", 11),
+            wraplength=480,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        skip_backup_var = tk.BooleanVar(master=self.root, value=False)
+        tk.Checkbutton(
+            dialog,
+            text="已自行备份，本次不再生成备份文件",
+            variable=skip_backup_var,
+            font=("Microsoft YaHei", 10),
+            bg=self.card_color,
+            anchor="w",
+            padx=16,
+        ).pack(anchor="w", fill=tk.X, padx=16, pady=(0, 12))
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+
+        def confirm():
+            result["value"] = skip_backup_var.get()
+            done.set(True)
+            dialog.destroy()
+
+        def cancel():
+            result["value"] = None
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(button_frame, text="取消", command=cancel, font=("Microsoft YaHei", 10), width=10).pack(side=tk.RIGHT)
+        tk.Button(button_frame, text="开始执行", command=confirm, font=("Microsoft YaHei", 10), width=10).pack(
+            side=tk.RIGHT,
+            padx=(0, 8),
+        )
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.bind("<Escape>", lambda event: cancel())
+        self._show_dialog_no_grab(dialog, min_width=540)
+        self.root.wait_variable(done)
+        return result["value"]
+
     def run_export_sheets(self):
         """按钮回调函数，将一个工作簿按工作表拆分为多个文件"""
         source_path = filedialog.askopenfilename(
@@ -1089,9 +1147,22 @@ class ExcelToolkitApp:
             self._log_info("用户已取消操作。")
             return
 
+        skip_backup = self._ask_clear_multi_backup_option_no_grab()
+        if skip_backup is None:
+            self._log_info("用户已取消操作。")
+            return
+
         result = clear_multiple_workbooks_by_color(
             list(target_paths),
+            skip_backup=skip_backup,
             logger=self._flushing_logger(),
+        )
+        backup_message = (
+            f"批次备份目录：{result['batch_backup_dir']}"
+            if result["batch_backup_dir"]
+            else "备份方式：用户选择跳过备份"
+            if skip_backup
+            else "备份方式：无需备份"
         )
         self._show_info_no_grab(
             "按颜色清空内容",
@@ -1101,6 +1172,7 @@ class ExcelToolkitApp:
             f"跳过文件：{result['skipped_file_count']}\n"
             f"失败文件：{result['failed_file_count']}\n"
             f"清空单元格：{result['cleared_cell_count']}\n"
+            f"{backup_message}\n"
             f"处理日志：{result['log_path']}",
             dialog_width=620,
             wraplength=560,

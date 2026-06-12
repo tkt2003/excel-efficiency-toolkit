@@ -31,6 +31,7 @@ OPENPYXL_COLOR_WORKBOOK_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm"}
 KEEP_VBA_EXTENSIONS = {".xlsm", ".xltm"}
 LOG_WORKBOOK_PREFIX = "按颜色清空内容_处理日志"
 BACKUP_SUFFIX = "按颜色清空内容备份"
+BATCH_BACKUP_DIR_PREFIX = "按颜色清空内容_备份"
 
 
 def is_supported_openpyxl_color_workbook(path: str) -> bool:
@@ -76,6 +77,23 @@ def create_clear_by_color_backup(workbook_path: str, timestamp: str | None = Non
     return backup_path
 
 
+def build_clear_by_color_batch_backup_dir(base_dir: str, timestamp: str | None = None) -> str:
+    abs_base_dir = os.path.abspath(base_dir or ".")
+    stamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(abs_base_dir, f"{BATCH_BACKUP_DIR_PREFIX}_{stamp}")
+
+
+def build_unique_backup_file_path(batch_backup_dir: str, file_name: str) -> str:
+    stem, ext = os.path.splitext(file_name)
+    counter = 1
+    while True:
+        suffix = "" if counter == 1 else f"_{counter}"
+        backup_path = os.path.join(batch_backup_dir, f"{stem}{suffix}{ext}")
+        if not os.path.exists(backup_path):
+            return backup_path
+        counter += 1
+
+
 def build_clear_by_color_log_path(output_dir: str, timestamp: str | None = None) -> str:
     abs_output_dir = os.path.abspath(output_dir or ".")
     stamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -95,8 +113,9 @@ def build_clear_summary_log_record(
     matched_sheet_count: int,
     matched_cell_count: int,
     cleared_cell_count: int,
-    backup_path: str,
     save_mode: str,
+    backup_mode: str,
+    backup_path: str,
     status: str,
     note: str,
 ) -> dict:
@@ -105,8 +124,9 @@ def build_clear_summary_log_record(
         "匹配工作表数量": matched_sheet_count,
         "匹配单元格数量": matched_cell_count,
         "清空单元格数量": cleared_cell_count,
-        "备份路径": backup_path,
         "保存方式": save_mode,
+        "备份方式": backup_mode,
+        "备份路径": backup_path,
         "状态": status,
         "说明": note,
     }
@@ -138,7 +158,7 @@ def write_clear_by_color_log_workbook(
     workbook = Workbook()
     summary_sheet = workbook.active
     summary_sheet.title = "处理汇总"
-    summary_headers = ["文件路径", "匹配工作表数量", "匹配单元格数量", "清空单元格数量", "备份路径", "保存方式", "状态", "说明"]
+    summary_headers = ["文件路径", "匹配工作表数量", "匹配单元格数量", "清空单元格数量", "保存方式", "备份方式", "备份路径", "状态", "说明"]
     summary_sheet.append(summary_headers)
     for record in summary_records:
         summary_sheet.append([record.get(header, "") for header in summary_headers])
@@ -310,6 +330,136 @@ def resolve_multi_workbook_save_mode(workbook_path: str) -> str:
     return "com" if workbook_has_external_links(workbook_path) else "openpyxl"
 
 
+def analyze_multi_workbook_clear_target(workbook_path: str, selected_color_key: tuple) -> dict:
+    abs_path = os.path.abspath(workbook_path)
+    record = {
+        "file_path": abs_path,
+        "file_name": os.path.basename(abs_path),
+        "is_supported": False,
+        "has_external_links": False,
+        "matched_sheet_count": 0,
+        "matched_cell_count": 0,
+        "save_mode": "跳过",
+        "needs_modify": False,
+        "backup_mode": "跳过",
+        "backup_path": "",
+        "status": "跳过",
+        "note": "",
+        "sheet_plans": [],
+        "sheet_clear_plans": [],
+    }
+
+    if os.path.basename(abs_path).startswith("~$"):
+        record["note"] = "临时文件已跳过。"
+        return record
+
+    if not os.path.exists(abs_path):
+        record["status"] = "失败"
+        record["note"] = "目标文件不存在。"
+        return record
+
+    _, ext = os.path.splitext(abs_path)
+    if ext.lower() == ".xls":
+        record["note"] = ".xls 暂不支持，请另存为 xlsx/xlsm/xltx/xltm。"
+        return record
+
+    if not is_supported_openpyxl_color_workbook(abs_path):
+        record["note"] = "不支持的文件类型。"
+        return record
+
+    record["is_supported"] = True
+    record["has_external_links"] = workbook_has_external_links(abs_path)
+
+    color_plan = scan_workbook_color_matches(abs_path, selected_color_key)
+    record["matched_sheet_count"] = color_plan["matched_sheet_count"]
+    record["matched_cell_count"] = color_plan["matched_cell_count"]
+    record["sheet_plans"] = color_plan["sheet_plans"]
+    record["sheet_clear_plans"] = build_sheet_clear_plans(color_plan["sheet_plans"])
+
+    if color_plan["matched_cell_count"] == 0:
+        record["backup_mode"] = "无需备份"
+        record["note"] = "未找到同色单元格。"
+        return record
+
+    record["save_mode"] = resolve_multi_workbook_save_mode(abs_path)
+    record["needs_modify"] = True
+    record["status"] = "待处理"
+    record["backup_mode"] = ""
+    return record
+
+
+def collect_multi_workbook_clear_records(target_paths: list[str], selected_color_key: tuple, logger=None) -> list[dict]:
+    records = []
+    total = len(target_paths)
+    for index, target_path in enumerate(target_paths, start=1):
+        abs_path = os.path.abspath(target_path)
+        filename = os.path.basename(abs_path)
+        _log(logger, "info", f"正在扫描目标文件 {index}/{total}：{filename}")
+        try:
+            scan_start = time.perf_counter()
+            record = analyze_multi_workbook_clear_target(abs_path, selected_color_key)
+            scan_seconds = time.perf_counter() - scan_start
+            record["scan_seconds"] = scan_seconds
+            _log(logger, "info", f"扫描耗时：{scan_seconds:.2f} 秒。")
+            _log(logger, "info", f"匹配 sheet 数：{record['matched_sheet_count']}")
+            _log(logger, "info", f"匹配单元格数：{record['matched_cell_count']}")
+            if record["needs_modify"]:
+                _log(logger, "info", f"保存方式：{record['save_mode']}")
+            records.append(record)
+        except Exception as e:
+            records.append({
+                "file_path": abs_path,
+                "file_name": filename,
+                "is_supported": False,
+                "has_external_links": False,
+                "matched_sheet_count": 0,
+                "matched_cell_count": 0,
+                "save_mode": "失败",
+                "needs_modify": False,
+                "backup_mode": "跳过",
+                "backup_path": "",
+                "status": "失败",
+                "note": str(e),
+                "sheet_plans": [],
+                "sheet_clear_plans": [],
+                "scan_seconds": 0.0,
+            })
+    return records
+
+
+def get_multi_workbook_backup_candidates(records: list[dict]) -> list[dict]:
+    return [record for record in records if record.get("needs_modify")]
+
+
+def apply_multi_workbook_backup_plan(
+    records: list[dict],
+    base_dir: str,
+    skip_backup: bool,
+    timestamp: str | None = None,
+) -> str:
+    candidates = get_multi_workbook_backup_candidates(records)
+    if not candidates:
+        for record in records:
+            if record.get("backup_mode") == "":
+                record["backup_mode"] = "无需备份"
+        return ""
+
+    if skip_backup:
+        for record in candidates:
+            record["backup_mode"] = "用户选择不备份"
+            record["backup_path"] = "用户选择不备份"
+        return ""
+
+    batch_backup_dir = build_clear_by_color_batch_backup_dir(base_dir, timestamp=timestamp)
+    os.makedirs(batch_backup_dir, exist_ok=True)
+    for record in candidates:
+        backup_path = build_unique_backup_file_path(batch_backup_dir, record["file_name"])
+        shutil.copy2(record["file_path"], backup_path)
+        record["backup_mode"] = "批次备份"
+        record["backup_path"] = backup_path
+    return batch_backup_dir
+
+
 def plan_clear_active_workbook_by_color(logger=None) -> dict:
     context = prepare_active_fill_color_context(logger=logger)
     if not context["saved_state"]:
@@ -382,7 +532,7 @@ def execute_clear_active_workbook_plan(plan: dict, logger=None) -> dict:
         pythoncom.CoUninitialize()
 
 
-def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> dict:
+def clear_multiple_workbooks_by_color(target_paths: list[str], skip_backup: bool = False, logger=None) -> dict:
     if not target_paths:
         raise ValueError("请选择至少一个目标工作簿。")
 
@@ -401,100 +551,61 @@ def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> d
     failed_file_count = 0
     cleared_cell_total = 0
     output_dir = os.path.dirname(os.path.abspath(target_paths[0])) or os.getcwd()
+    records = collect_multi_workbook_clear_records(target_paths, context["selected_color_key"], logger=logger)
+    batch_backup_dir = apply_multi_workbook_backup_plan(records, output_dir, skip_backup=skip_backup)
+    if batch_backup_dir:
+        _log(logger, "info", f"批次备份文件夹：{batch_backup_dir}")
+    elif skip_backup and get_multi_workbook_backup_candidates(records):
+        _log(logger, "info", "用户已选择跳过备份，本次不会生成备份文件。")
 
-    for index, target_path in enumerate(target_paths, start=1):
-        abs_path = os.path.abspath(target_path)
-        filename = os.path.basename(abs_path)
-        _log(logger, "info", f"正在处理目标文件 {index}/{len(target_paths)}：{filename}")
+    for record in records:
+        if record["needs_modify"]:
+            try:
+                if record["save_mode"] == "com":
+                    clear_result = clear_closed_workbook_with_com(
+                        record["file_path"],
+                        record["sheet_clear_plans"],
+                        logger=logger,
+                    )
+                else:
+                    clear_result = clear_workbook_file_with_openpyxl(
+                        record["file_path"],
+                        record["sheet_plans"],
+                        detail_records=detail_records,
+                        logger=logger,
+                    )
 
-        if os.path.basename(abs_path).startswith("~$"):
-            skipped_file_count += 1
-            summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", "临时文件已跳过。")
-            )
-            continue
-
-        if not os.path.exists(abs_path):
+                record["status"] = "成功"
+                record["cleared_cell_count"] = clear_result["cleared_cell_count"]
+                record["note"] = (
+                    "已清空值和公式，保留格式。"
+                    if clear_result["skipped_merged_cell_count"] == 0
+                    else f"已清空值和公式，保留格式；跳过 {clear_result['skipped_merged_cell_count']} 个合并区域非左上角单元格。"
+                )
+                modified_file_count += 1
+                cleared_cell_total += clear_result["cleared_cell_count"]
+            except Exception as e:
+                record["status"] = "失败"
+                record["note"] = str(e)
+                failed_file_count += 1
+        elif record["status"] == "失败":
             failed_file_count += 1
-            summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "失败", "失败", "目标文件不存在。")
-            )
-            continue
-
-        _, ext = os.path.splitext(abs_path)
-        if ext.lower() == ".xls":
+        else:
             skipped_file_count += 1
-            summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", ".xls 暂不支持，请另存为 xlsx/xlsm/xltx/xltm。")
+
+        summary_records.append(
+            build_clear_summary_log_record(
+                record["file_path"],
+                record["matched_sheet_count"],
+                record["matched_cell_count"],
+                record.get("cleared_cell_count", 0),
+                record["save_mode"],
+                record["backup_mode"],
+                record["backup_path"],
+                record["status"],
+                record["note"],
             )
-            continue
-
-        if not is_supported_openpyxl_color_workbook(abs_path):
-            skipped_file_count += 1
-            summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", "不支持的文件类型。")
-            )
-            continue
-
-        try:
-            scan_start = time.perf_counter()
-            color_plan = scan_workbook_color_matches(abs_path, context["selected_color_key"])
-            scan_seconds = time.perf_counter() - scan_start
-            _log(logger, "info", f"扫描耗时：{scan_seconds:.2f} 秒。")
-            _log(logger, "info", f"匹配 sheet 数：{color_plan['matched_sheet_count']}")
-            _log(logger, "info", f"匹配单元格数：{color_plan['matched_cell_count']}")
-
-            if color_plan["matched_cell_count"] == 0:
-                skipped_file_count += 1
-                summary_records.append(
-                    build_clear_summary_log_record(abs_path, 0, 0, 0, "", "跳过", "跳过", "未找到同色单元格。")
-                )
-                continue
-
-            sheet_clear_plans = build_sheet_clear_plans(color_plan["sheet_plans"])
-            backup_path = create_clear_by_color_backup(abs_path)
-            _log(logger, "info", f"已生成备份：{backup_path}")
-            save_mode = resolve_multi_workbook_save_mode(abs_path)
-            _log(logger, "info", f"保存方式：{save_mode}")
-
-            if save_mode == "com":
-                clear_result = clear_closed_workbook_with_com(
-                    abs_path,
-                    sheet_clear_plans,
-                    logger=logger,
-                )
-            else:
-                clear_result = clear_workbook_file_with_openpyxl(
-                    abs_path,
-                    color_plan["sheet_plans"],
-                    detail_records=detail_records,
-                    logger=logger,
-                )
-
-            modified_file_count += 1
-            cleared_cell_total += clear_result["cleared_cell_count"]
-            note = (
-                "已清空值和公式，保留格式。"
-                if clear_result["skipped_merged_cell_count"] == 0
-                else f"已清空值和公式，保留格式；跳过 {clear_result['skipped_merged_cell_count']} 个合并区域非左上角单元格。"
-            )
-            summary_records.append(
-                build_clear_summary_log_record(
-                    abs_path,
-                    color_plan["matched_sheet_count"],
-                    color_plan["matched_cell_count"],
-                    clear_result["cleared_cell_count"],
-                    backup_path,
-                    save_mode,
-                    "成功",
-                    note,
-                )
-            )
-        except Exception as e:
-            failed_file_count += 1
-            summary_records.append(
-                build_clear_summary_log_record(abs_path, 0, 0, 0, "", "失败", "失败", str(e))
-            )
+        )
 
     log_path = write_clear_by_color_log_workbook(output_dir, summary_records, detail_records)
     _log(logger, "info", f"处理日志：{log_path}")
@@ -511,6 +622,7 @@ def clear_multiple_workbooks_by_color(target_paths: list[str], logger=None) -> d
         "failed_file_count": failed_file_count,
         "cleared_cell_count": cleared_cell_total,
         "log_path": log_path,
+        "batch_backup_dir": batch_backup_dir,
         "summary_records": summary_records,
     }
 
