@@ -69,8 +69,8 @@ class ExcelToolkitApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Excel 效率工具台")
-        self.root.geometry("860x760")
-        self.root.minsize(780, 720)
+        self.root.geometry("860x800")
+        self.root.minsize(780, 760)
         self.bg_color = "#f5f6f8"
         self.card_color = "#ffffff"
         self.border_color = "#d7dce2"
@@ -78,7 +78,7 @@ class ExcelToolkitApp:
         self.root.configure(bg=self.bg_color)
 
         self.main_frame = tk.Frame(root, bg=self.bg_color)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=18, pady=14)
 
         self._create_header(self.main_frame)
         self._create_feature_area(self.main_frame)
@@ -90,7 +90,7 @@ class ExcelToolkitApp:
 
     def _create_header(self, parent):
         header = tk.Frame(parent, bg=self.bg_color)
-        header.pack(fill=tk.X, pady=(0, 12))
+        header.pack(fill=tk.X, pady=(0, 10))
 
         tk.Label(
             header,
@@ -105,11 +105,11 @@ class ExcelToolkitApp:
             font=("Microsoft YaHei", 10),
             fg="#5f6b7a",
             bg=self.bg_color,
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w", pady=(3, 0))
 
     def _create_feature_area(self, parent):
         feature_area = tk.Frame(parent, bg=self.bg_color)
-        feature_area.pack(fill=tk.X, pady=(0, 14))
+        feature_area.pack(fill=tk.X, pady=(0, 10))
         feature_area.columnconfigure(0, weight=1, uniform="feature")
         feature_area.columnconfigure(1, weight=1, uniform="feature")
 
@@ -136,7 +136,7 @@ class ExcelToolkitApp:
         )
         self._create_feature_group(
             left_column,
-            "模板填报 / 附注汇总",
+            "模板生成 / 取数",
             [
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
                 ("数据穿透取数", "btn_data_drill", self.run_data_drill),
@@ -172,11 +172,11 @@ class ExcelToolkitApp:
             bg=self.card_color,
             bd=1,
             relief="solid",
-            padx=12,
-            pady=10,
+            padx=10,
+            pady=8,
             labelanchor="nw",
         )
-        group.pack(fill=tk.X, pady=(0, 10))
+        group.pack(fill=tk.X, pady=(0, 8))
 
         for index, (text, attr_name, command) in enumerate(items):
             button = tk.Button(
@@ -185,7 +185,7 @@ class ExcelToolkitApp:
                 font=("Microsoft YaHei", 10),
                 command=command,
                 width=30,
-                height=2,
+                height=1,
                 bg="#f8fafc",
                 fg=self.text_color,
                 activebackground="#e9eef5",
@@ -193,14 +193,15 @@ class ExcelToolkitApp:
                 relief="groove",
                 bd=1,
                 anchor="w",
-                padx=10,
+                padx=8,
+                pady=4,
             )
-            button.pack(fill=tk.X, pady=(0 if index == 0 else 8, 0))
+            button.pack(fill=tk.X, pady=(0 if index == 0 else 6, 0))
             setattr(self, attr_name, button)
 
     def _create_log_area(self, parent):
         self.frame_bottom = tk.Frame(parent, bg=self.bg_color)
-        self.frame_bottom.pack(fill=tk.BOTH, expand=True)
+        self.frame_bottom.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
 
         tk.Label(
             self.frame_bottom,
@@ -208,20 +209,22 @@ class ExcelToolkitApp:
             font=("Microsoft YaHei", 11, "bold"),
             fg=self.text_color,
             bg=self.bg_color,
-        ).pack(anchor="w", pady=(0, 6))
+        ).pack(anchor="w", pady=(0, 4))
 
         log_frame = tk.Frame(
             self.frame_bottom,
             bg=self.card_color,
             highlightbackground=self.border_color,
             highlightthickness=1,
+            height=140,
         )
         log_frame.pack(fill=tk.BOTH, expand=True)
+        log_frame.pack_propagate(False)
 
         self.log_text = scrolledtext.ScrolledText(
             log_frame,
             state="disabled",
-            height=14,
+            height=8,
             font=("Consolas", 10),
             bg="#ffffff",
             fg="#111827",
@@ -1170,35 +1173,32 @@ class ExcelToolkitApp:
         self._log_info("按模板批量生成 Excel：开始选择生成模式。")
         mode = self._ask_choice_no_grab(
             "按模板批量生成 Excel",
-            "请选择生成模式：\n\n"
-            "1. 按清单生成：适合已有清单 sheet，按行复制模板并替换外部链接。\n"
-            "2. 多选源文件生成（单链接）：适合一个模板主要替换一个外部链接，每个源文件生成一个 Excel。\n"
-            "3. 多链接规则表生成：适合一个模板包含多个外部链接，可按规则表分别替换；留空则保持原链接不变。",
+            "请选择生成方式：\n\n"
+            "替换一个链接生成\n"
+            "适合：模板里只需要更换一个 TB / 附注 / 底稿链接。\n\n"
+            "替换多个链接生成\n"
+            "适合：模板里有合并 TB、单体 TB 等多个链接，需要用规则表逐项替换。",
             [
-                ("按清单生成", "checklist"),
-                ("多选源文件生成（单链接）", "single"),
-                ("多链接规则表生成", "multi"),
+                ("替换一个链接生成", "single"),
+                ("替换多个链接生成", "multi"),
             ],
-            dialog_width=640,
-            wraplength=580,
+            dialog_width=500,
+            wraplength=440,
         )
         if mode is None:
             self._log_info("用户已取消操作。")
             return
-        if mode == "checklist":
-            self._log_info("已选择：按清单生成。")
-            self.run_report_generate()
-            return
         if mode == "single":
-            self._log_info("已选择：单链接模式。")
+            self._log_info("已选择：替换一个链接生成。")
             self.run_template_tb_report()
-        else:
-            self._log_info("已选择：多链接模式。")
+            return
+        if mode == "multi":
+            self._log_info("已选择：替换多个链接生成。")
             self.run_template_multi_link()
 
     def run_template_tb_report(self):
-        """扫描模板外部链接、多选 TB 文件、按 TB 生成多份报表（单链接模式）。"""
-        self._log_info("按模板批量生成 Excel（单链接模式）：开始操作。")
+        """扫描模板外部链接、多选 TB 文件、按 TB 生成多份报表（替换一个链接生成）。"""
+        self._log_info("按模板批量生成 Excel（替换一个链接生成）：开始操作。")
         template_path = filedialog.askopenfilename(
             title="请选择模板 Excel 工作簿",
             filetypes=[
@@ -1415,8 +1415,8 @@ class ExcelToolkitApp:
         return result["value"]
 
     def run_template_multi_link(self):
-        """扫描模板外部链接、生成规则表后批量按多链接替换（多链接模式）。"""
-        self._log_info("按模板批量生成 Excel（多链接模式）：开始操作。")
+        """扫描模板外部链接、生成规则表后批量按多链接替换（替换多个链接生成）。"""
+        self._log_info("按模板批量生成 Excel（替换多个链接生成）：开始操作。")
         template_path = filedialog.askopenfilename(
             title="请选择模板 Excel 工作簿",
             filetypes=[
