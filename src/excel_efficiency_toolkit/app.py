@@ -140,9 +140,7 @@ class ExcelToolkitApp:
             [
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
                 ("数据穿透取数", "btn_data_drill", self.run_data_drill),
-                ("按清单生成报表", "btn_report_generate", self.run_report_generate),
-                ("按模板批量生成 Excel", "btn_template_tb_report", self.run_template_tb_report),
-                ("按模板多链接生成 Excel", "btn_template_multi_link", self.run_template_multi_link),
+                ("按模板批量生成 Excel", "btn_template_tb_report", self.run_template_generate),
                 ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
             ],
         )
@@ -1125,7 +1123,7 @@ class ExcelToolkitApp:
             self._log_info("用户已取消操作。")
             return
 
-        self.btn_report_generate.config(state="disabled")
+        self.btn_template_tb_report.config(state="disabled")
         try:
             result = generate_reports_from_checklist(
                 template_path=template_path,
@@ -1165,11 +1163,42 @@ class ExcelToolkitApp:
                 wraplength=500,
             )
         finally:
-            self.btn_report_generate.config(state="normal")
+            self.btn_template_tb_report.config(state="normal")
+
+    def run_template_generate(self):
+        """按钮回调函数，先在弹窗中让用户选择生成模式，再调用对应实现。"""
+        self._log_info("按模板批量生成 Excel：开始选择生成模式。")
+        mode = self._ask_choice_no_grab(
+            "按模板批量生成 Excel",
+            "请选择生成模式：\n\n"
+            "1. 按清单生成：适合已有清单 sheet，按行复制模板并替换外部链接。\n"
+            "2. 多选源文件生成（单链接）：适合一个模板主要替换一个外部链接，每个源文件生成一个 Excel。\n"
+            "3. 多链接规则表生成：适合一个模板包含多个外部链接，可按规则表分别替换；留空则保持原链接不变。",
+            [
+                ("按清单生成", "checklist"),
+                ("多选源文件生成（单链接）", "single"),
+                ("多链接规则表生成", "multi"),
+            ],
+            dialog_width=640,
+            wraplength=580,
+        )
+        if mode is None:
+            self._log_info("用户已取消操作。")
+            return
+        if mode == "checklist":
+            self._log_info("已选择：按清单生成。")
+            self.run_report_generate()
+            return
+        if mode == "single":
+            self._log_info("已选择：单链接模式。")
+            self.run_template_tb_report()
+        else:
+            self._log_info("已选择：多链接模式。")
+            self.run_template_multi_link()
 
     def run_template_tb_report(self):
-        """按钮回调函数，扫描模板外部链接、多选 TB 文件、按 TB 生成多份报表"""
-        self._log_info("按模板批量生成 Excel：开始操作。")
+        """扫描模板外部链接、多选 TB 文件、按 TB 生成多份报表（单链接模式）。"""
+        self._log_info("按模板批量生成 Excel（单链接模式）：开始操作。")
         template_path = filedialog.askopenfilename(
             title="请选择模板 Excel 工作簿",
             filetypes=[
@@ -1386,7 +1415,8 @@ class ExcelToolkitApp:
         return result["value"]
 
     def run_template_multi_link(self):
-        self._log_info("按模板多链接生成 Excel：开始操作。")
+        """扫描模板外部链接、生成规则表后批量按多链接替换（多链接模式）。"""
+        self._log_info("按模板批量生成 Excel（多链接模式）：开始操作。")
         template_path = filedialog.askopenfilename(
             title="请选择模板 Excel 工作簿",
             filetypes=[
@@ -1398,7 +1428,7 @@ class ExcelToolkitApp:
             self._log_info("用户已取消操作。")
             return
 
-        self.btn_template_multi_link.config(state="disabled")
+        self.btn_template_tb_report.config(state="disabled")
         try:
             try:
                 template_links = read_template_external_links(template_path)
@@ -1497,7 +1527,7 @@ class ExcelToolkitApp:
                 wraplength=500,
             )
         finally:
-            self.btn_template_multi_link.config(state="normal")
+            self.btn_template_tb_report.config(state="normal")
 
     def _confirm_template_multi_link_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
