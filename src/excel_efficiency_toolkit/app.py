@@ -2,6 +2,11 @@ import os
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, scrolledtext
+from .clear_by_color_ops import (
+    clear_multiple_workbooks_by_color,
+    execute_clear_active_workbook_plan,
+    plan_clear_active_workbook_by_color,
+)
 from .color_sum_ops import sum_current_sheet_by_fill_color, sum_matching_sheets_by_fill_color
 from .data_drill_ops import (
     build_data_drill_range_records,
@@ -149,6 +154,7 @@ class ExcelToolkitApp:
             "模板生成 / 取数",
             [
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
+                ("按颜色清空内容", "btn_clear_by_color", self.run_clear_by_color),
                 ("数据穿透查询", "btn_data_drill", self.run_data_drill),
                 ("按模板批量生成 Excel", "btn_template_tb_report", self.run_template_generate),
                 ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
@@ -1009,6 +1015,96 @@ class ExcelToolkitApp:
             self._log_error(f"按颜色汇总求和失败：{type(e).__name__}: {e}")
         finally:
             self.btn_color_sum.config(state="normal")
+
+    def run_clear_by_color(self):
+        self._log_info("按颜色清空内容：开始操作。")
+        try:
+            mode = self._ask_choice_no_grab(
+                "按颜色清空内容",
+                "请选择清空范围：\n\n"
+                "当前活动工作簿\n"
+                "清空当前打开的活动工作簿中所有可见 sheet 里，同颜色单元格的内容。\n\n"
+                "多个工作簿\n"
+                "批量清空所选工作簿中所有可见 sheet 里，同颜色单元格的内容。",
+                [
+                    ("当前活动工作簿", "active"),
+                    ("多个工作簿", "multi"),
+                ],
+                dialog_width=620,
+                wraplength=560,
+            )
+            if mode is None:
+                self._log_info("用户已取消操作。")
+                return
+
+            self.btn_clear_by_color.config(state="disabled")
+            if mode == "active":
+                self._run_clear_current_workbook_by_color()
+            else:
+                self._run_clear_multiple_workbooks_by_color()
+        except Exception as e:
+            self._log_error(f"按颜色清空内容失败：{type(e).__name__}: {e}")
+            self._show_info_no_grab(
+                "按颜色清空内容",
+                f"按颜色清空内容失败：{e}",
+                dialog_width=560,
+                wraplength=500,
+            )
+        finally:
+            self.btn_clear_by_color.config(state="normal")
+
+    def _run_clear_current_workbook_by_color(self):
+        plan = plan_clear_active_workbook_by_color(logger=self._flushing_logger())
+        if plan["matched_cell_count"] == 0:
+            self._log_info("未找到匹配单元格，已取消清空。")
+            self._show_info_no_grab(
+                "按颜色清空内容",
+                "未找到匹配单元格，不执行清空。",
+            )
+            return
+
+        result = execute_clear_active_workbook_plan(plan, logger=self._flushing_logger())
+        self._show_info_no_grab(
+            "按颜色清空内容",
+            "清空完成。\n"
+            f"当前颜色：{result['current_color_text']}\n"
+            f"匹配工作表：{result['matched_sheet_count']}\n"
+            f"清空工作表：{result['cleared_sheet_count']}\n"
+            f"清空单元格：{result['cleared_cell_count']}\n\n"
+            f"备份文件：{result['backup_path']}\n"
+            "原文件已用 openpyxl 保存，并已重新打开供检查。",
+            dialog_width=520,
+            wraplength=460,
+        )
+
+    def _run_clear_multiple_workbooks_by_color(self):
+        target_paths = filedialog.askopenfilenames(
+            title="请选择需要按颜色清空内容的 Excel 文件",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm *.xltx *.xltm *.xls"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not target_paths:
+            self._log_info("用户已取消操作。")
+            return
+
+        result = clear_multiple_workbooks_by_color(
+            list(target_paths),
+            logger=self._flushing_logger(),
+        )
+        self._show_info_no_grab(
+            "按颜色清空内容",
+            "批量清空完成。\n"
+            f"当前颜色：{result['current_color_text']}\n"
+            f"成功处理文件：{result['processed_file_count']}\n"
+            f"跳过文件：{result['skipped_file_count']}\n"
+            f"失败文件：{result['failed_file_count']}\n"
+            f"清空单元格：{result['cleared_cell_count']}\n"
+            f"处理日志：{result['log_path']}",
+            dialog_width=620,
+            wraplength=560,
+        )
 
     def run_data_drill(self):
         """统一入口：按当前活动工作表和选区执行单文件或多文件数据穿透查询"""
