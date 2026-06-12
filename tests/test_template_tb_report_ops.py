@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 from src.excel_efficiency_toolkit.template_tb_report_ops import (
     LOG_HEADERS,
     LOG_WORKBOOK_NAME,
-    OUTPUT_STEM_SUFFIX,
+    DEFAULT_OUTPUT_NAME_SUFFIX,
     TemplateTbReportRecord,
     build_output_filename,
     build_tb_report_plan,
@@ -14,6 +14,7 @@ from src.excel_efficiency_toolkit.template_tb_report_ops import (
     is_office_temp_file,
     is_supported_tb_file,
     is_supported_template_file,
+    normalize_output_name_suffix,
     summarize_tb_report_records,
     write_tb_report_log_workbook,
 )
@@ -53,31 +54,51 @@ def test_office_temp_file_detection():
 
 
 def test_build_output_filename_uses_tb_stem_and_template_suffix():
-    assert build_output_filename(r"D:\path\子公司1.xlsx", ".xlsx") == f"子公司1{OUTPUT_STEM_SUFFIX}.xlsx"
-    assert build_output_filename(r"D:\path\子公司1.xlsx", ".xlsm") == f"子公司1{OUTPUT_STEM_SUFFIX}.xlsm"
-    assert build_output_filename("子公司1TB.xlsx", ".xlsx") == f"子公司1TB{OUTPUT_STEM_SUFFIX}.xlsx"
+    assert build_output_filename(r"D:\path\子公司1.xlsx", ".xlsx") == f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
+    assert build_output_filename(r"D:\path\子公司1.xlsx", ".xlsm") == f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsm"
+    assert build_output_filename("子公司1TB.xlsx", ".xlsx") == f"子公司1TB{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
+
+
+def test_build_output_filename_supports_custom_and_empty_suffix():
+    assert build_output_filename("子公司1.xlsx", ".xlsx", "_附注") == "子公司1_附注.xlsx"
+    assert build_output_filename("子公司1.xlsx", ".xlsm", "_财务报表") == "子公司1_财务报表.xlsm"
+    assert build_output_filename("子公司1.xlsx", ".xlsx", "") == "子公司1.xlsx"
+    assert build_output_filename("子公司1.xlsx", ".xlsx", "  ") == "子公司1.xlsx"
+
+
+def test_build_output_filename_uses_default_suffix_when_none_passed():
+    assert build_output_filename("子公司1.xlsx", ".xlsx", None) == f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
+
+
+def test_normalize_output_name_suffix_handles_none_empty_and_whitespace():
+    assert normalize_output_name_suffix(None) == DEFAULT_OUTPUT_NAME_SUFFIX
+    assert DEFAULT_OUTPUT_NAME_SUFFIX == "_批量生成"
+    assert normalize_output_name_suffix("") == ""
+    assert normalize_output_name_suffix("   ") == ""
+    assert normalize_output_name_suffix("_附注") == "_附注"
+    assert normalize_output_name_suffix("  _附注  ") == "_附注"
 
 
 def test_build_unique_output_path_adds_sequence_without_overwrite(tmp_path):
-    first_path = tmp_path / f"子公司1{OUTPUT_STEM_SUFFIX}.xlsx"
-    second_path = tmp_path / f"子公司1{OUTPUT_STEM_SUFFIX}_2.xlsx"
+    first_path = tmp_path / f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
+    second_path = tmp_path / f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}_2.xlsx"
     first_path.write_text("exists", encoding="utf-8")
     second_path.write_text("exists", encoding="utf-8")
 
-    output_path = build_unique_output_path(str(tmp_path), f"子公司1{OUTPUT_STEM_SUFFIX}.xlsx")
+    output_path = build_unique_output_path(str(tmp_path), f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx")
 
-    assert output_path == str(tmp_path / f"子公司1{OUTPUT_STEM_SUFFIX}_3.xlsx")
+    assert output_path == str(tmp_path / f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}_3.xlsx")
     assert first_path.read_text(encoding="utf-8") == "exists"
     assert second_path.read_text(encoding="utf-8") == "exists"
 
 
 def test_build_unique_output_path_respects_reserved_paths(tmp_path):
-    target_name = f"子公司1{OUTPUT_STEM_SUFFIX}.xlsx"
+    target_name = f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
     reserved = {str(tmp_path / target_name)}
 
     output_path = build_unique_output_path(str(tmp_path), target_name, reserved_paths=reserved)
 
-    assert output_path == str(tmp_path / f"子公司1{OUTPUT_STEM_SUFFIX}_2.xlsx")
+    assert output_path == str(tmp_path / f"子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}_2.xlsx")
 
 
 def test_build_plan_requires_template_path(tmp_path):
@@ -149,8 +170,8 @@ def test_build_plan_skips_temp_and_unsupported_files_and_keeps_xlsm_extension(tm
         "跳过",
         "跳过",
     ]
-    assert plan.records[0].output_name == f"tb_子公司1{OUTPUT_STEM_SUFFIX}.xlsm"
-    assert plan.records[1].output_name == f"tb_子公司2{OUTPUT_STEM_SUFFIX}.xlsm"
+    assert plan.records[0].output_name == f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsm"
+    assert plan.records[1].output_name == f"tb_子公司2{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsm"
     assert plan.records[2].message == "临时文件已跳过"
     assert "仅支持" in plan.records[3].message
     assert "仅支持" in plan.records[4].message
@@ -160,7 +181,7 @@ def test_build_plan_skips_temp_and_unsupported_files_and_keeps_xlsm_extension(tm
 def test_build_plan_auto_numbers_existing_output_files(tmp_path):
     template_path = _make_template(tmp_path)
     tb_path = _make_tb_file(tmp_path, "tb_子公司1.xlsx")
-    existing_output = tmp_path / f"tb_子公司1{OUTPUT_STEM_SUFFIX}.xlsx"
+    existing_output = tmp_path / f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
     existing_output.write_text("exists", encoding="utf-8")
 
     plan = build_tb_report_plan(
@@ -170,8 +191,55 @@ def test_build_plan_auto_numbers_existing_output_files(tmp_path):
         old_link_path=r"D:\old\old_tb.xlsx",
     )
 
-    assert plan.records[0].output_name == f"tb_子公司1{OUTPUT_STEM_SUFFIX}_2.xlsx"
+    assert plan.records[0].output_name == f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}_2.xlsx"
     assert existing_output.read_text(encoding="utf-8") == "exists"
+
+
+def test_build_plan_uses_default_suffix_when_not_passed(tmp_path):
+    template_path = _make_template(tmp_path)
+    tb_path = _make_tb_file(tmp_path, "tb_子公司1.xlsx")
+
+    plan = build_tb_report_plan(
+        template_path=template_path,
+        tb_paths=[tb_path],
+        output_dir=str(tmp_path),
+        old_link_path=r"D:\old\old_tb.xlsx",
+    )
+
+    assert plan.output_name_suffix == DEFAULT_OUTPUT_NAME_SUFFIX
+    assert plan.records[0].output_name == f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
+
+
+def test_build_plan_uses_custom_output_name_suffix(tmp_path):
+    template_path = _make_template(tmp_path)
+    tb_path = _make_tb_file(tmp_path, "tb_子公司1.xlsx")
+
+    plan = build_tb_report_plan(
+        template_path=template_path,
+        tb_paths=[tb_path],
+        output_dir=str(tmp_path),
+        old_link_path=r"D:\old\old_tb.xlsx",
+        output_name_suffix="_附注",
+    )
+
+    assert plan.output_name_suffix == "_附注"
+    assert plan.records[0].output_name == "tb_子公司1_附注.xlsx"
+
+
+def test_build_plan_with_empty_suffix_uses_pure_tb_stem(tmp_path):
+    template_path = _make_template(tmp_path, name="template.xlsm")
+    tb_path = _make_tb_file(tmp_path, "tb_子公司1.xlsx")
+
+    plan = build_tb_report_plan(
+        template_path=template_path,
+        tb_paths=[tb_path],
+        output_dir=str(tmp_path),
+        old_link_path=r"D:\old\old_tb.xlsx",
+        output_name_suffix="   ",
+    )
+
+    assert plan.output_name_suffix == ""
+    assert plan.records[0].output_name == "tb_子公司1.xlsm"
 
 
 def test_build_plan_handles_duplicate_tb_names_with_unique_outputs(tmp_path):
@@ -189,8 +257,8 @@ def test_build_plan_handles_duplicate_tb_names_with_unique_outputs(tmp_path):
     )
 
     output_names = [record.output_name for record in plan.records]
-    assert output_names[0] == f"tb_子公司1{OUTPUT_STEM_SUFFIX}.xlsx"
-    assert output_names[1] == f"tb_子公司1{OUTPUT_STEM_SUFFIX}_2.xlsx"
+    assert output_names[0] == f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"
+    assert output_names[1] == f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}_2.xlsx"
 
 
 def test_summarize_records_counts_statuses():
@@ -216,8 +284,8 @@ def test_write_log_workbook_creates_unique_path_and_writes_records(tmp_path):
             index=1,
             tb_path=str(tmp_path / "tb_子公司1.xlsx"),
             tb_name="tb_子公司1.xlsx",
-            output_name=f"tb_子公司1{OUTPUT_STEM_SUFFIX}.xlsx",
-            output_path=str(tmp_path / f"tb_子公司1{OUTPUT_STEM_SUFFIX}.xlsx"),
+            output_name=f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx",
+            output_path=str(tmp_path / f"tb_子公司1{DEFAULT_OUTPUT_NAME_SUFFIX}.xlsx"),
             old_link_path=r"D:\old\old_tb.xlsx",
             new_link_path=str(tmp_path / "tb_子公司1.xlsx"),
             status="成功",

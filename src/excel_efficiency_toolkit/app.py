@@ -48,6 +48,7 @@ from .report_generate_ops import (
 )
 from .round_formula_ops import round_selected_range_to_two_decimals
 from .template_tb_report_ops import (
+    DEFAULT_OUTPUT_NAME_SUFFIX,
     generate_reports_from_template_and_tb_files,
     read_template_external_links,
 )
@@ -136,7 +137,7 @@ class ExcelToolkitApp:
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
                 ("数据穿透取数", "btn_data_drill", self.run_data_drill),
                 ("按清单生成报表", "btn_report_generate", self.run_report_generate),
-                ("按模板多选 TB 生成报表", "btn_template_tb_report", self.run_template_tb_report),
+                ("按模板批量生成 Excel", "btn_template_tb_report", self.run_template_tb_report),
                 ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
             ],
         )
@@ -1163,7 +1164,7 @@ class ExcelToolkitApp:
 
     def run_template_tb_report(self):
         """按钮回调函数，扫描模板外部链接、多选 TB 文件、按 TB 生成多份报表"""
-        self._log_info("按模板多选 TB 生成报表：开始操作。")
+        self._log_info("按模板批量生成 Excel：开始操作。")
         template_path = filedialog.askopenfilename(
             title="请选择模板 Excel 工作簿",
             filetypes=[
@@ -1182,7 +1183,7 @@ class ExcelToolkitApp:
             except Exception as e:
                 self._log_error(f"扫描模板外部链接失败：{e}")
                 self._show_info_no_grab(
-                    "按模板多选 TB 生成报表",
+                    "按模板批量生成 Excel",
                     f"扫描模板外部链接失败：{e}",
                     dialog_width=560,
                     wraplength=500,
@@ -1192,7 +1193,7 @@ class ExcelToolkitApp:
             if not template_links:
                 self._log_error("模板没有外部链接，无法执行换链接生成报表。")
                 self._show_info_no_grab(
-                    "按模板多选 TB 生成报表",
+                    "按模板批量生成 Excel",
                     "模板没有外部链接，无法执行换链接生成报表。\n请确认模板含有引用其他工作簿的公式后重试。",
                     dialog_width=520,
                     wraplength=460,
@@ -1229,13 +1230,28 @@ class ExcelToolkitApp:
                 self._log_info("用户已取消操作。")
                 return
 
+            suffix_input = self._ask_text_no_grab(
+                "按模板批量生成 Excel",
+                "请输入输出文件名后缀，留空则直接使用 TB 文件名主体。\n"
+                "常用：_批量生成、_附注、_财务报表、_底稿、_报表",
+                default=DEFAULT_OUTPUT_NAME_SUFFIX,
+                entry_width=24,
+                dialog_width=480,
+                wraplength=420,
+            )
+            if suffix_input is None:
+                self._log_info("用户已取消操作。")
+                return
+            output_name_suffix = suffix_input.strip()
+
             confirmed = self._ask_choice_no_grab(
-                "按模板多选 TB 生成报表",
+                "按模板批量生成 Excel",
                 "请确认生成口径：\n"
                 f"模板路径：{template_path}\n"
                 f"被替换的旧链接：{old_link_path}\n"
                 f"TB 文件数量：{len(tb_paths)}\n"
-                f"输出目录：{output_dir}\n\n"
+                f"输出目录：{output_dir}\n"
+                f"输出后缀：{output_name_suffix or '（留空：直接使用 TB 文件名主体）'}\n\n"
                 "程序会逐个 TB 复制完整模板，并将选中的旧链接替换为该 TB 路径；\n"
                 "其他外部链接保持不变；原模板不会被修改。",
                 [("开始生成", "run")],
@@ -1248,11 +1264,13 @@ class ExcelToolkitApp:
 
             self._log_info(f"TB 文件数量：{len(tb_paths)}")
             self._log_info(f"输出目录：{output_dir}")
+            self._log_info(f"输出后缀：{output_name_suffix or '（留空）'}")
             result = generate_reports_from_template_and_tb_files(
                 template_path=template_path,
                 tb_paths=list(tb_paths),
                 output_dir=output_dir,
                 old_link_path=old_link_path,
+                output_name_suffix=output_name_suffix,
                 logger=self._flushing_logger(),
             )
             for record in result["records"]:
@@ -1261,14 +1279,14 @@ class ExcelToolkitApp:
                     f"{record.status}；{record.message}"
                 )
             self._log_info(
-                "按模板多选 TB 生成报表完成："
+                "按模板批量生成 Excel完成："
                 f"成功 {result['success_count']} 个；"
                 f"跳过 {result['skipped_count']} 个；"
                 f"失败 {result['failed_count']} 个；"
                 f"日志：{result['log_path']}"
             )
             self._show_info_no_grab(
-                "按模板多选 TB 生成报表",
+                "按模板批量生成 Excel",
                 "生成完成。\n"
                 f"TB 文件数量：{result['tb_file_count']}\n"
                 f"成功数量：{result['success_count']}\n"
@@ -1281,10 +1299,10 @@ class ExcelToolkitApp:
                 wraplength=560,
             )
         except Exception as e:
-            self._log_error(f"按模板多选 TB 生成报表失败：{type(e).__name__}: {e}")
+            self._log_error(f"按模板批量生成 Excel失败：{type(e).__name__}: {e}")
             self._show_info_no_grab(
-                "按模板多选 TB 生成报表",
-                f"按模板多选 TB 生成报表失败：{e}",
+                "按模板批量生成 Excel",
+                f"按模板批量生成 Excel失败：{e}",
                 dialog_width=560,
                 wraplength=500,
             )

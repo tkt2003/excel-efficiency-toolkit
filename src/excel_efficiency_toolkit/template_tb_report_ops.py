@@ -12,8 +12,8 @@ from .link_replace_ops import XL_EXCEL_LINKS, normalize_com_link_sources
 
 SUPPORTED_TEMPLATE_EXTENSIONS = {".xlsx", ".xlsm"}
 SUPPORTED_TB_EXTENSIONS = {".xlsx", ".xlsm"}
-OUTPUT_STEM_SUFFIX = "_报表"
-LOG_WORKBOOK_NAME = "按模板多选TB生成报表_处理日志.xlsx"
+DEFAULT_OUTPUT_NAME_SUFFIX = "_批量生成"
+LOG_WORKBOOK_NAME = "按模板批量生成Excel_处理日志.xlsx"
 LOG_HEADERS = [
     "序号",
     "TB 文件名",
@@ -46,6 +46,7 @@ class TemplateTbReportPlan:
     template_suffix: str
     output_dir: str
     old_link_path: str
+    output_name_suffix: str = DEFAULT_OUTPUT_NAME_SUFFIX
     records: list[TemplateTbReportRecord] = field(default_factory=list)
 
 
@@ -67,10 +68,20 @@ def is_supported_tb_file(path: str) -> bool:
     return Path(filename).suffix.lower() in SUPPORTED_TB_EXTENSIONS
 
 
-def build_output_filename(tb_path: str, template_suffix: str) -> str:
+def normalize_output_name_suffix(suffix: object) -> str:
+    if suffix is None:
+        return DEFAULT_OUTPUT_NAME_SUFFIX
+    text = str(suffix).strip()
+    if text == "":
+        return ""
+    return text
+
+
+def build_output_filename(tb_path: str, template_suffix: str, output_name_suffix: str | None = None) -> str:
     stem = Path(str(tb_path)).stem
     suffix = template_suffix if template_suffix.startswith(".") else f".{template_suffix}"
-    return f"{stem}{OUTPUT_STEM_SUFFIX}{suffix}"
+    name_suffix = normalize_output_name_suffix(output_name_suffix)
+    return f"{stem}{name_suffix}{suffix}"
 
 
 def build_unique_output_path(
@@ -99,6 +110,7 @@ def build_tb_report_plan(
     tb_paths: list[str],
     output_dir: str,
     old_link_path: str,
+    output_name_suffix: str = DEFAULT_OUTPUT_NAME_SUFFIX,
 ) -> TemplateTbReportPlan:
     template_str = str(template_path or "").strip()
     if not template_str:
@@ -116,12 +128,14 @@ def build_tb_report_plan(
     abs_template_path = os.path.abspath(template_str)
     abs_output_dir = os.path.abspath(str(output_dir or "").strip() or ".")
     template_suffix = Path(abs_template_path).suffix
+    name_suffix = normalize_output_name_suffix(output_name_suffix)
 
     plan = TemplateTbReportPlan(
         template_path=abs_template_path,
         template_suffix=template_suffix,
         output_dir=abs_output_dir,
         old_link_path=old_link_text,
+        output_name_suffix=name_suffix,
     )
 
     used_output_paths: set[str] = set()
@@ -156,7 +170,7 @@ def build_tb_report_plan(
         record.tb_name = os.path.basename(abs_tb_path)
         record.new_link_path = abs_tb_path
 
-        output_name = build_output_filename(abs_tb_path, template_suffix)
+        output_name = build_output_filename(abs_tb_path, template_suffix, name_suffix)
         output_path = build_unique_output_path(abs_output_dir, output_name, used_output_paths)
         used_output_paths.add(output_path)
 
@@ -274,9 +288,10 @@ def generate_reports_from_template_and_tb_files(
     tb_paths: list[str],
     output_dir: str,
     old_link_path: str,
+    output_name_suffix: str | None = None,
     logger=None,
 ) -> dict:
-    plan = build_tb_report_plan(template_path, tb_paths, output_dir, old_link_path)
+    plan = build_tb_report_plan(template_path, tb_paths, output_dir, old_link_path, output_name_suffix)
     abs_template_path = plan.template_path
     if not os.path.exists(abs_template_path):
         raise FileNotFoundError(f"模板工作簿不存在：{abs_template_path}")
@@ -351,6 +366,7 @@ def generate_reports_from_template_and_tb_files(
         "template_path": abs_template_path,
         "output_dir": plan.output_dir,
         "old_link_path": plan.old_link_path,
+        "output_name_suffix": plan.output_name_suffix,
         "tb_file_count": len(plan.records),
         "log_path": log_path,
         "records": plan.records,
