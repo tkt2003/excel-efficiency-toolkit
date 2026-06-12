@@ -47,6 +47,10 @@ from .report_generate_ops import (
     generate_reports_from_checklist,
 )
 from .round_formula_ops import round_selected_range_to_two_decimals
+from .template_tb_report_ops import (
+    generate_reports_from_template_and_tb_files,
+    read_template_external_links,
+)
 from .sheet_ops import generate_sheet_index_sheet_with_links
 from .table_ops import (
     merge_workbook_sheets_to_new_sheet,
@@ -132,6 +136,7 @@ class ExcelToolkitApp:
                 ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
                 ("数据穿透取数", "btn_data_drill", self.run_data_drill),
                 ("按清单生成报表", "btn_report_generate", self.run_report_generate),
+                ("按模板多选 TB 生成报表", "btn_template_tb_report", self.run_template_tb_report),
                 ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
             ],
         )
@@ -1155,6 +1160,207 @@ class ExcelToolkitApp:
             )
         finally:
             self.btn_report_generate.config(state="normal")
+
+    def run_template_tb_report(self):
+        """按钮回调函数，扫描模板外部链接、多选 TB 文件、按 TB 生成多份报表"""
+        self._log_info("按模板多选 TB 生成报表：开始操作。")
+        template_path = filedialog.askopenfilename(
+            title="请选择模板 Excel 工作簿",
+            filetypes=[
+                ("Excel 文件", "*.xlsx *.xlsm"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not template_path:
+            self._log_info("用户已取消操作。")
+            return
+
+        self.btn_template_tb_report.config(state="disabled")
+        try:
+            try:
+                template_links = read_template_external_links(template_path)
+            except Exception as e:
+                self._log_error(f"扫描模板外部链接失败：{e}")
+                self._show_info_no_grab(
+                    "按模板多选 TB 生成报表",
+                    f"扫描模板外部链接失败：{e}",
+                    dialog_width=560,
+                    wraplength=500,
+                )
+                return
+
+            if not template_links:
+                self._log_error("模板没有外部链接，无法执行换链接生成报表。")
+                self._show_info_no_grab(
+                    "按模板多选 TB 生成报表",
+                    "模板没有外部链接，无法执行换链接生成报表。\n请确认模板含有引用其他工作簿的公式后重试。",
+                    dialog_width=520,
+                    wraplength=460,
+                )
+                return
+
+            self._log_info(f"模板外部链接数量：{len(template_links)}")
+            for link_path in template_links:
+                self._log_info(f"  - {link_path}")
+
+            if len(template_links) == 1:
+                old_link_path = template_links[0]
+                self._log_info(f"模板只有 1 个外部链接，已自动选择：{old_link_path}")
+            else:
+                old_link_path = self._ask_old_link_choice_no_grab(template_links)
+                if not old_link_path:
+                    self._log_info("用户已取消操作。")
+                    return
+                self._log_info(f"用户选择要替换的旧链接：{old_link_path}")
+
+            tb_paths = filedialog.askopenfilenames(
+                title="请多选 TB 文件",
+                filetypes=[
+                    ("Excel 文件", "*.xlsx *.xlsm"),
+                    ("所有文件", "*.*"),
+                ],
+            )
+            if not tb_paths:
+                self._log_info("用户已取消操作。")
+                return
+
+            output_dir = filedialog.askdirectory(title="请选择输出目录")
+            if not output_dir:
+                self._log_info("用户已取消操作。")
+                return
+
+            confirmed = self._ask_choice_no_grab(
+                "按模板多选 TB 生成报表",
+                "请确认生成口径：\n"
+                f"模板路径：{template_path}\n"
+                f"被替换的旧链接：{old_link_path}\n"
+                f"TB 文件数量：{len(tb_paths)}\n"
+                f"输出目录：{output_dir}\n\n"
+                "程序会逐个 TB 复制完整模板，并将选中的旧链接替换为该 TB 路径；\n"
+                "其他外部链接保持不变；原模板不会被修改。",
+                [("开始生成", "run")],
+                dialog_width=620,
+                wraplength=560,
+            )
+            if confirmed != "run":
+                self._log_info("用户已取消操作。")
+                return
+
+            self._log_info(f"TB 文件数量：{len(tb_paths)}")
+            self._log_info(f"输出目录：{output_dir}")
+            result = generate_reports_from_template_and_tb_files(
+                template_path=template_path,
+                tb_paths=list(tb_paths),
+                output_dir=output_dir,
+                old_link_path=old_link_path,
+                logger=self._flushing_logger(),
+            )
+            for record in result["records"]:
+                self._log_info(
+                    f"第 {record.index} 个：{record.tb_name} -> {record.output_name or '-'}；"
+                    f"{record.status}；{record.message}"
+                )
+            self._log_info(
+                "按模板多选 TB 生成报表完成："
+                f"成功 {result['success_count']} 个；"
+                f"跳过 {result['skipped_count']} 个；"
+                f"失败 {result['failed_count']} 个；"
+                f"日志：{result['log_path']}"
+            )
+            self._show_info_no_grab(
+                "按模板多选 TB 生成报表",
+                "生成完成。\n"
+                f"TB 文件数量：{result['tb_file_count']}\n"
+                f"成功数量：{result['success_count']}\n"
+                f"跳过数量：{result['skipped_count']}\n"
+                f"失败数量：{result['failed_count']}\n"
+                f"输出目录：{result['output_dir']}\n"
+                f"日志文件：{result['log_path']}\n\n"
+                "原模板工作簿未被修改。",
+                dialog_width=620,
+                wraplength=560,
+            )
+        except Exception as e:
+            self._log_error(f"按模板多选 TB 生成报表失败：{type(e).__name__}: {e}")
+            self._show_info_no_grab(
+                "按模板多选 TB 生成报表",
+                f"按模板多选 TB 生成报表失败：{e}",
+                dialog_width=560,
+                wraplength=500,
+            )
+        finally:
+            self.btn_template_tb_report.config(state="normal")
+
+    def _ask_old_link_choice_no_grab(self, link_paths):
+        result = {"value": None}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog = tk.Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title("选择要替换的旧链接")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        tk.Label(
+            dialog,
+            text="模板存在多个外部链接，请选择要替换的旧链接：",
+            font=("Microsoft YaHei", 11),
+            wraplength=520,
+            justify="left",
+            padx=16,
+            pady=12,
+        ).pack(anchor="w")
+
+        selected_index = tk.IntVar(master=dialog, value=0)
+        radio_frame = tk.Frame(dialog)
+        radio_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
+        for index, link_path in enumerate(link_paths):
+            tk.Radiobutton(
+                radio_frame,
+                text=link_path,
+                variable=selected_index,
+                value=index,
+                font=("Microsoft YaHei", 10),
+                wraplength=520,
+                justify="left",
+                anchor="w",
+            ).pack(anchor="w", pady=2)
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(padx=16, pady=(8, 14), fill=tk.X)
+
+        def confirm():
+            try:
+                result["value"] = link_paths[selected_index.get()]
+            except (IndexError, tk.TclError):
+                result["value"] = None
+            done.set(True)
+            dialog.destroy()
+
+        def cancel():
+            result["value"] = None
+            done.set(True)
+            dialog.destroy()
+
+        tk.Button(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT)
+        tk.Button(
+            button_frame,
+            text="确定",
+            command=confirm,
+            font=("Microsoft YaHei", 10),
+            width=10,
+        ).pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.bind("<Escape>", lambda event: cancel())
+        self._show_dialog_no_grab(dialog, min_width=580)
+        self.root.wait_variable(done)
+        return result["value"]
 
     def run_round_formula(self):
         """按钮回调函数，将当前 Excel 选区内数值/公式直接包裹 ROUND(...,2)"""
