@@ -1,4 +1,5 @@
 import os
+import sys
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, scrolledtext
@@ -80,10 +81,15 @@ from .workbook_drill_ops import (
 )
 from .workbook_merge_ops import merge_workbooks_to_existing_workbook
 
+APP_NAME = "老头表格助手"
+APP_VERSION = "0.1.0"
+APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
+
+
 class ExcelToolkitApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("老头表格助手")
+        self.root.title(APP_TITLE)
         self.root.geometry("860x800")
         self.root.minsize(780, 760)
         self.bg_color = "#f5f6f8"
@@ -101,19 +107,42 @@ class ExcelToolkitApp:
 
         # 初始化自定义 logger
         self.logger = setup_logger(self.log_text)
-        self.logger.info("欢迎使用 老头表格助手。程序已就绪。")
+        self.logger.info(f"欢迎使用 {APP_TITLE}。程序已就绪。")
 
     def _create_header(self, parent):
         header = tk.Frame(parent, bg=self.bg_color)
         header.pack(fill=tk.X, pady=(0, 10))
 
+        title_row = tk.Frame(header, bg=self.bg_color)
+        title_row.pack(fill=tk.X)
+
         tk.Label(
-            header,
-            text="老头表格助手",
+            title_row,
+            text=APP_NAME,
             font=("Microsoft YaHei", 18, "bold"),
             fg=self.text_color,
             bg=self.bg_color,
-        ).pack(anchor="w")
+        ).pack(side=tk.LEFT, anchor="w")
+
+        help_buttons = tk.Frame(title_row, bg=self.bg_color)
+        help_buttons.pack(side=tk.RIGHT, anchor="e")
+        for text, command in (("使用说明", self.show_user_guide), ("关于", self.show_about)):
+            tk.Button(
+                help_buttons,
+                text=text,
+                font=("Microsoft YaHei", 9),
+                command=command,
+                width=8,
+                bg="#f8fafc",
+                fg=self.text_color,
+                activebackground="#e9eef5",
+                activeforeground=self.text_color,
+                relief="groove",
+                bd=1,
+                padx=4,
+                pady=2,
+            ).pack(side=tk.LEFT, padx=(6, 0))
+
         tk.Label(
             header,
             text="请选择需要执行的功能。多数功能不自动保存；会保存目标文件的功能会在执行前提示。",
@@ -251,6 +280,62 @@ class ExcelToolkitApp:
             pady=8,
         )
         self.log_text.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+    def _get_project_root(self):
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+    def _find_user_guide_path(self):
+        candidates = []
+        if getattr(sys, "frozen", False):
+            candidates.append(os.path.dirname(sys.executable))
+            candidates.append(self._get_project_root())
+        else:
+            candidates.append(self._get_project_root())
+            candidates.append(os.getcwd())
+
+        seen = set()
+        for base_dir in candidates:
+            guide_path = os.path.abspath(os.path.join(base_dir, "使用说明.txt"))
+            if guide_path in seen:
+                continue
+            seen.add(guide_path)
+            if os.path.isfile(guide_path):
+                return guide_path
+        return None
+
+    def show_user_guide(self):
+        guide_path = self._find_user_guide_path()
+        if guide_path:
+            try:
+                os.startfile(guide_path)
+                self.logger.info(f"已打开使用说明：{guide_path}")
+                return
+            except OSError as exc:
+                self.logger.error(f"打开使用说明失败：{exc}")
+
+        self._show_info_no_grab(
+            "使用说明",
+            (
+                "老头表格助手用于处理常见 Excel 批量整理工作。\n"
+                "批量修改类功能请先备份或先用副本试跑。\n"
+                "详细说明请查看同目录下的 使用说明.txt。"
+            ),
+            dialog_width=460,
+            wraplength=420,
+        )
+
+    def show_about(self):
+        self._show_info_no_grab(
+            "关于",
+            (
+                f"软件名：{APP_NAME}\n"
+                f"版本号：v{APP_VERSION}\n"
+                "说明：面向审计、财务、报表整理场景的 Excel 效率工具\n"
+                "当前阶段：常用功能阶段性完成"
+            ),
+            dialog_width=520,
+            wraplength=480,
+        )
 
     def _center_window(self, window, width=None, height=None):
         window.update_idletasks()
