@@ -139,6 +139,12 @@ class ExcelToolkitApp:
         self.accent_soft_color = "#dbeafe"
         self.card_hover_color = "#f1f6fb"
         self.card_disabled_color = "#f8fafc"
+        self.header_subtitle_font = ("Microsoft YaHei", 11)
+        self.header_button_font = ("Microsoft YaHei", 12)
+        self.section_title_font = ("Microsoft YaHei", 15, "bold")
+        self.card_title_font = ("Microsoft YaHei", 12, "bold")
+        self.card_description_font = ("Microsoft YaHei", 11)
+        self.log_font = ("Consolas", 12)
         self.feature_buttons = {}
         self.feature_cards = {}
         self.root.configure(fg_color=self.bg_color)
@@ -289,7 +295,7 @@ class ExcelToolkitApp:
             AppButton(
                 help_buttons,
                 text=text,
-                font=("Microsoft YaHei", 9),
+                font=self.header_button_font,
                 command=command,
                 width=76,
                 height=28,
@@ -303,8 +309,8 @@ class ExcelToolkitApp:
 
         ctk.CTkLabel(
             title_block,
-            text="Excel 批量整理工具台",
-            font=("Microsoft YaHei", 11),
+            text="Excel 效率工作台",
+            font=self.header_subtitle_font,
             text_color="#475569",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
@@ -345,7 +351,7 @@ class ExcelToolkitApp:
         ctk.CTkLabel(
             panel,
             text=title,
-            font=("Microsoft YaHei", 14, "bold"),
+            font=self.section_title_font,
             text_color=self.text_color,
         ).grid(row=0, column=0, sticky="w", padx=12, pady=(9, 6))
 
@@ -371,7 +377,7 @@ class ExcelToolkitApp:
         title_label = ctk.CTkLabel(
             card,
             text=title,
-            font=("Microsoft YaHei", 12, "bold"),
+            font=self.card_title_font,
             text_color=self.text_color,
             anchor="w",
         )
@@ -382,22 +388,14 @@ class ExcelToolkitApp:
             padx=(12, 8),
             pady=(7, 0) if has_description else (0, 0),
         )
-        arrow_label = ctk.CTkLabel(
-            card,
-            text="›",
-            font=("Microsoft YaHei", 18, "bold"),
-            text_color=self.muted_text_color,
-            width=18,
-        )
-        arrow_label.grid(row=0, column=1, rowspan=2 if has_description else 1, sticky="e", padx=(0, 12))
-        widgets = [card, title_label, arrow_label]
+        widgets = [card, title_label]
         desc_label = None
         if has_description:
             desc_label = ctk.CTkLabel(
                 card,
                 text=description,
-                font=("Microsoft YaHei", 10),
-                text_color="#526274",
+                font=self.card_description_font,
+                text_color="#475569",
                 anchor="w",
                 justify="left",
             )
@@ -414,8 +412,7 @@ class ExcelToolkitApp:
             )
             title_label.configure(text_color=self.subtle_text_color if is_disabled else self.text_color)
             if desc_label is not None:
-                desc_label.configure(text_color=self.subtle_text_color if is_disabled else "#526274")
-            arrow_label.configure(text_color=self.subtle_text_color if is_disabled else self.muted_text_color)
+                desc_label.configure(text_color=self.subtle_text_color if is_disabled else "#475569")
             if is_disabled:
                 card._feature_enabled = False
             else:
@@ -493,7 +490,7 @@ class ExcelToolkitApp:
             self.frame_bottom,
             state="disabled",
             height=66,
-            font=("Consolas", 11),
+            font=self.log_font,
             fg_color="#f8fafc",
             text_color="#111827",
             border_width=1,
