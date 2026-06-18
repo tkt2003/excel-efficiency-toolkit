@@ -171,13 +171,13 @@ class ExcelToolkitApp:
                 [
                     (
                         "按工作表拆分文件",
-                        "把一个 Excel 文件按工作表拆成多个文件",
+                        "",
                         "btn_export_sheets",
                         self.run_export_sheets,
                     ),
                     (
                         "按指定列拆分工作表",
-                        "按指定列的值拆分当前工作表",
+                        "",
                         "btn_split_sheet",
                         self.run_split_sheet,
                     ),
@@ -188,13 +188,13 @@ class ExcelToolkitApp:
                 [
                     (
                         "多个工作表合并到一张表",
-                        "把多个工作表追加合并到一个结果表",
+                        "",
                         "btn_merge_sheets",
                         self.run_merge_sheets,
                     ),
                     (
                         "多个 Excel 文件合并到一个文件",
-                        "把多个 Excel 文件导入到一个目标文件",
+                        "",
                         "btn_merge_workbooks",
                         self.run_merge_workbooks,
                     ),
@@ -205,19 +205,19 @@ class ExcelToolkitApp:
                 [
                     (
                         "按颜色汇总求和",
-                        "按填充色位置汇总多个文件中的数值",
+                        "按填充色位置对多文件数值求和",
                         "btn_color_sum",
                         self.run_color_sum,
                     ),
                     (
                         "按颜色清空内容",
-                        "清空指定填充色单元格内容，保留格式",
+                        "",
                         "btn_clear_by_color",
                         self.run_clear_by_color,
                     ),
                     (
                         "数据穿透查询",
-                        "按单元格或区域查询多个表或文件中的数据",
+                        "查询多文件/多工作表中的单元格或区域数值",
                         "btn_data_drill",
                         self.run_data_drill,
                     ),
@@ -229,24 +229,18 @@ class ExcelToolkitApp:
                     ),
                     (
                         "选区 ROUND 保留两位",
-                        "套用 ROUND 公式保留两位小数",
+                        "",
                         "btn_round_formula",
                         self.run_round_formula,
                     ),
                 ],
             ),
             (
-                "目录与链接",
+                "工作簿辅助",
                 [
                     (
-                        "批量更换 Excel 链接",
-                        "批量替换多个 Excel 文件中的外部链接",
-                        "btn_link_replace",
-                        self.run_batch_link_replace,
-                    ),
-                    (
                         "生成工作表目录",
-                        "生成可点击跳转的工作表目录",
+                        "",
                         "btn_sheet_index",
                         self.run_sheet_index,
                     ),
@@ -255,13 +249,19 @@ class ExcelToolkitApp:
             (
                 "批量维护",
                 [
-                    ("批量删除工作表", "按规则表批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
-                    ("批量重命名文件", "按规则表批量修改文件名", "btn_rename_files", self.run_batch_rename_files),
+                    ("批量删除工作表", "", "btn_delete_sheets", self.run_delete_sheets),
+                    ("批量重命名文件", "", "btn_rename_files", self.run_batch_rename_files),
                     (
                         "批量重命名工作表",
-                        "按规则表批量修改工作表名",
+                        "",
                         "btn_rename_sheets",
                         self.run_batch_rename_sheets,
+                    ),
+                    (
+                        "批量更换 Excel 链接",
+                        "批量替换多个文件的外部链接",
+                        "btn_link_replace",
+                        self.run_batch_link_replace,
                     ),
                 ],
             ),
@@ -327,7 +327,7 @@ class ExcelToolkitApp:
 
         groups = dict(self._feature_groups())
         left_sections = ("拆分导出", "合并整理", "批量维护")
-        right_sections = ("模板生成 / 取数", "目录与链接")
+        right_sections = ("模板生成 / 取数", "工作簿辅助")
 
         for column, section_names in enumerate((left_sections, right_sections)):
             column_frame = ctk.CTkFrame(feature_area, fg_color="transparent")
