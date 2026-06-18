@@ -601,6 +601,66 @@ class ExcelToolkitApp:
     def _flushing_logger(self):
         return _FlushingLogger(self.logger, self._flush_ui)
 
+    def _create_dialog_card(self, title, resizable=False):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.withdraw()
+        dialog.title(title)
+        dialog.resizable(resizable, resizable)
+        dialog.transient(self.root)
+        dialog.configure(fg_color=self.bg_color)
+
+        card = ctk.CTkFrame(
+            dialog,
+            fg_color=self.card_color,
+            corner_radius=10,
+            border_width=1,
+            border_color="#e5edf5",
+        )
+        card.pack(fill=tk.BOTH, expand=True, padx=18, pady=18)
+
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=("Microsoft YaHei", 15, "bold"),
+            text_color=self.text_color,
+        ).pack(anchor="w", padx=18, pady=(16, 8))
+
+        return dialog, card
+
+    def _add_dialog_message(self, parent, message, wraplength=360, pady=(0, 12)):
+        label = ctk.CTkLabel(
+            parent,
+            text=message,
+            font=("Microsoft YaHei", 12),
+            wraplength=wraplength,
+            justify="left",
+            text_color=self.text_color,
+        )
+        label.pack(anchor="w", padx=18, pady=pady)
+        return label
+
+    def _create_dialog_button_bar(self, parent):
+        button_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        button_frame.pack(padx=18, pady=(4, 16), fill=tk.X)
+        return button_frame
+
+    def _add_dialog_button(self, parent, text, command, primary=False, width=None):
+        button_width = width or max(86, min(260, len(text) * 14 + 28))
+        return AppButton(
+            parent,
+            text=text,
+            command=command,
+            font=("Microsoft YaHei", 11),
+            width=button_width,
+            height=34,
+            fg_color=self.accent_color if primary else "#f8fafc",
+            hover_color="#1d4ed8" if primary else "#e9eef5",
+            text_color="#ffffff" if primary else self.text_color,
+            border_width=0 if primary else 1,
+            border_color=self.border_color,
+            corner_radius=7,
+        )
+
     def _show_dialog_no_grab(self, dialog, focus_widget=None, min_width=380, min_height=None):
         dialog.update_idletasks()
         width = max(dialog.winfo_reqwidth(), min_width)
@@ -642,29 +702,24 @@ class ExcelToolkitApp:
     def _ask_text_no_grab(self, title, prompt, default="", entry_width=30, dialog_width=380, wraplength=340):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.withdraw()
-        dialog.title(title)
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.configure(fg_color=self.card_color)
+        dialog, card = self._create_dialog_card(title)
 
-        ctk.CTkLabel(
-            dialog,
-            text=prompt,
-            font=("Microsoft YaHei", 11),
-            wraplength=wraplength,
-            justify="left",
+        self._add_dialog_message(card, prompt, wraplength=wraplength, pady=(0, 10))
+
+        entry = ctk.CTkEntry(
+            card,
+            font=("Microsoft YaHei", 12),
+            width=entry_width * 10,
+            height=34,
+            fg_color="#fbfdff",
+            border_color=self.border_color,
             text_color=self.text_color,
-        ).pack(anchor="w", padx=16, pady=(14, 8))
-
-        entry = ctk.CTkEntry(dialog, font=("Microsoft YaHei", 11), width=entry_width * 10)
-        entry.pack(padx=16, pady=(0, 12), fill=tk.X)
+        )
+        entry.pack(padx=18, pady=(0, 12), fill=tk.X)
         entry.insert(0, default)
         entry.select_range(0, tk.END)
 
-        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def confirm():
             result["value"] = entry.get()
@@ -676,37 +731,8 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        AppButton(
-            button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=76,
-            height=30,
-            fg_color="#f8fafc",
-            hover_color="#e9eef5",
-            text_color=self.text_color,
-            border_width=1,
-            border_color=self.border_color,
-            corner_radius=6,
-        ).pack(
-            side=tk.RIGHT,
-        )
-        AppButton(
-            button_frame,
-            text="确定",
-            command=confirm,
-            font=("Microsoft YaHei", 10),
-            width=76,
-            height=30,
-            fg_color=self.accent_color,
-            hover_color="#1d4ed8",
-            text_color="#ffffff",
-            corner_radius=6,
-        ).pack(
-            side=tk.RIGHT,
-            padx=(0, 8),
-        )
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        self._add_dialog_button(button_frame, "确定", confirm, primary=True).pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Return>", lambda event: confirm())
@@ -719,57 +745,26 @@ class ExcelToolkitApp:
     def _ask_choice_no_grab(self, title, prompt, choices, dialog_width=420, wraplength=360):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.withdraw()
-        dialog.title(title)
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.configure(fg_color=self.card_color)
+        dialog, card = self._create_dialog_card(title)
 
-        ctk.CTkLabel(
-            dialog,
-            text=prompt,
-            font=("Microsoft YaHei", 11),
-            wraplength=wraplength,
-            justify="left",
-            text_color=self.text_color,
-        ).pack(anchor="w", padx=16, pady=(14, 12))
+        self._add_dialog_message(card, prompt, wraplength=wraplength, pady=(0, 12))
 
-        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def choose(value):
             result["value"] = value
             done.set(True)
             dialog.destroy()
 
-        AppButton(
-            button_frame,
-            text="取消",
-            command=lambda: choose(None),
-            font=("Microsoft YaHei", 10),
-            width=76,
-            height=30,
-            fg_color="#f8fafc",
-            hover_color="#e9eef5",
-            text_color=self.text_color,
-            border_width=1,
-            border_color=self.border_color,
-            corner_radius=6,
-        ).pack(side=tk.RIGHT)
+        self._add_dialog_button(button_frame, "取消", lambda: choose(None)).pack(side=tk.RIGHT)
 
         for label, value in reversed(choices):
-            AppButton(
+            self._add_dialog_button(
                 button_frame,
-                text=label,
-                command=lambda selected=value: choose(selected),
-                font=("Microsoft YaHei", 10),
-                width=128,
-                height=30,
-                fg_color=self.accent_color,
-                hover_color="#1d4ed8",
-                text_color="#ffffff",
-                corner_radius=6,
+                label,
+                lambda selected=value: choose(selected),
+                primary=True,
+                width=max(128, len(label) * 14 + 28),
             ).pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", lambda: choose(None))
@@ -780,36 +775,12 @@ class ExcelToolkitApp:
         return result["value"]
 
     def _show_info_no_grab(self, title, message, dialog_width=400, wraplength=360):
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.withdraw()
-        dialog.title(title)
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.configure(fg_color=self.card_color)
+        dialog, card = self._create_dialog_card(title)
 
-        ctk.CTkLabel(
-            dialog,
-            text=message,
-            font=("Microsoft YaHei", 11),
-            wraplength=wraplength,
-            justify="left",
-            text_color=self.text_color,
-        ).pack(anchor="w", padx=16, pady=(14, 12))
+        self._add_dialog_message(card, message, wraplength=wraplength, pady=(0, 12))
 
-        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
-        AppButton(
-            button_frame,
-            text="确定",
-            command=dialog.destroy,
-            font=("Microsoft YaHei", 10),
-            width=76,
-            height=30,
-            fg_color=self.accent_color,
-            hover_color="#1d4ed8",
-            text_color="#ffffff",
-            corner_radius=6,
-        ).pack(side=tk.RIGHT)
+        button_frame = self._create_dialog_button_bar(card)
+        self._add_dialog_button(button_frame, "确定", dialog.destroy, primary=True).pack(side=tk.RIGHT)
 
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
         self._show_dialog_no_grab(dialog, min_width=dialog_width)
@@ -818,38 +789,31 @@ class ExcelToolkitApp:
     def _ask_clear_multi_backup_option_no_grab(self):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.withdraw()
-        dialog.title("按颜色清空内容")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.configure(fg_color=self.card_color)
+        dialog, card = self._create_dialog_card("按颜色清空内容")
 
-        ctk.CTkLabel(
-            dialog,
-            text=(
+        self._add_dialog_message(
+            card,
+            (
                 "多个工作簿模式默认会先扫描，再把实际会被修改的文件集中备份到一个批次备份文件夹。\n"
                 "无匹配、跳过或失败且未修改的文件不会备份。"
             ),
-            font=("Microsoft YaHei", 11),
             wraplength=480,
-            justify="left",
-            text_color=self.text_color,
-        ).pack(anchor="w", padx=16, pady=(14, 12))
+            pady=(0, 12),
+        )
 
         skip_backup_var = tk.BooleanVar(master=self.root, value=False)
         ctk.CTkCheckBox(
-            dialog,
+            card,
             text="已自行备份，本次不再生成备份文件",
             variable=skip_backup_var,
-            font=("Microsoft YaHei", 10),
+            font=("Microsoft YaHei", 11),
             text_color=self.text_color,
             fg_color=self.accent_color,
             hover_color="#1d4ed8",
-        ).pack(anchor="w", fill=tk.X, padx=16, pady=(0, 12))
+            border_color=self.border_color,
+        ).pack(anchor="w", fill=tk.X, padx=18, pady=(0, 12))
 
-        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def confirm():
             result["value"] = skip_backup_var.get()
@@ -861,35 +825,8 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        AppButton(
-            button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=76,
-            height=30,
-            fg_color="#f8fafc",
-            hover_color="#e9eef5",
-            text_color=self.text_color,
-            border_width=1,
-            border_color=self.border_color,
-            corner_radius=6,
-        ).pack(side=tk.RIGHT)
-        AppButton(
-            button_frame,
-            text="开始执行",
-            command=confirm,
-            font=("Microsoft YaHei", 10),
-            width=92,
-            height=30,
-            fg_color=self.accent_color,
-            hover_color="#1d4ed8",
-            text_color="#ffffff",
-            corner_radius=6,
-        ).pack(
-            side=tk.RIGHT,
-            padx=(0, 8),
-        )
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        self._add_dialog_button(button_frame, "开始执行", confirm, primary=True).pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
@@ -1879,39 +1816,45 @@ class ExcelToolkitApp:
     def _ask_old_link_choice_no_grab(self, link_paths, title, prompt):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title(title)
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
+        dialog, card = self._create_dialog_card(title)
 
-        tk.Label(
-            dialog,
-            text=prompt,
-            font=("Microsoft YaHei", 11),
-            wraplength=520,
-            justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+        self._add_dialog_message(card, prompt, wraplength=520, pady=(0, 12))
 
         selected_index = tk.IntVar(master=dialog, value=0)
-        radio_frame = tk.Frame(dialog)
-        radio_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
+        radio_frame = ctk.CTkFrame(
+            card,
+            fg_color="#fbfdff",
+            corner_radius=8,
+            border_width=1,
+            border_color=self.border_color,
+        )
+        radio_frame.pack(fill=tk.X, padx=18, pady=(0, 12))
         for index, link_path in enumerate(link_paths):
-            tk.Radiobutton(
-                radio_frame,
-                text=link_path,
+            row_frame = ctk.CTkFrame(radio_frame, fg_color="transparent")
+            row_frame.pack(fill=tk.X, padx=12, pady=5)
+            row_frame.grid_columnconfigure(1, weight=1)
+            ctk.CTkRadioButton(
+                row_frame,
+                text="",
                 variable=selected_index,
                 value=index,
-                font=("Microsoft YaHei", 10),
+                width=24,
+                fg_color=self.accent_color,
+                hover_color="#1d4ed8",
+                border_color=self.border_color,
+            ).grid(row=0, column=0, sticky="n", pady=1)
+            link_label = ctk.CTkLabel(
+                row_frame,
+                text=link_path,
+                font=("Microsoft YaHei", 11),
                 wraplength=520,
                 justify="left",
-                anchor="w",
-            ).pack(anchor="w", pady=2)
+                text_color=self.text_color,
+            )
+            link_label.grid(row=0, column=1, sticky="w", padx=(8, 0))
+            link_label.bind("<Button-1>", lambda event, selected=index: selected_index.set(selected))
 
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(padx=16, pady=(8, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def confirm():
             try:
@@ -1926,20 +1869,8 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(
-            button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=10,
-        ).pack(side=tk.RIGHT)
-        tk.Button(
-            button_frame,
-            text="确定",
-            command=confirm,
-            font=("Microsoft YaHei", 10),
-            width=10,
-        ).pack(side=tk.RIGHT, padx=(0, 8))
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        self._add_dialog_button(button_frame, "确定", confirm, primary=True).pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
@@ -2074,29 +2005,21 @@ class ExcelToolkitApp:
     def _confirm_template_multi_link_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title("按模板多链接生成 Excel")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
+        dialog, card = self._create_dialog_card("按模板多链接生成 Excel")
 
-        tk.Label(
-            dialog,
-            text=(
+        self._add_dialog_message(
+            card,
+            (
                 "规则表已打开。\n"
                 "请检查【生成清单】，按需填写其他旧链接对应的新链接列；\n"
                 "新链接留空表示不替换该旧链接。\n"
                 "保存并关闭/释放规则表后，再点击执行。"
             ),
-            font=("Microsoft YaHei", 11),
             wraplength=460,
-            justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+            pady=(0, 12),
+        )
 
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def execute():
             execute_button.config(state="disabled")
@@ -2152,19 +2075,13 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        execute_button = self._add_dialog_button(
             button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=10,
-        ).pack(side=tk.RIGHT)
-        execute_button = tk.Button(
-            button_frame,
-            text="我已检查规则，开始生成",
-            command=execute,
-            font=("Microsoft YaHei", 10),
-            width=24,
+            "我已检查规则，开始生成",
+            execute,
+            primary=True,
+            width=210,
         )
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -2572,24 +2489,16 @@ class ExcelToolkitApp:
     def _confirm_delete_rule_ready(self, rule_table_path):
         result = {"execute": False}
         done = tk.BooleanVar(value=False)
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title("批量删除工作表")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
+        dialog, card = self._create_dialog_card("批量删除工作表")
 
-        tk.Label(
-            dialog,
-            text="规则表已打开。请在 B/C/D 列填写规则并保存规则表后，再点击执行。",
-            font=("Microsoft YaHei", 11),
+        self._add_dialog_message(
+            card,
+            "规则表已打开。请在 B/C/D 列填写规则并保存规则表后，再点击执行。",
             wraplength=360,
-            justify="left",
-            padx=16,
-            pady=12,
-        ).pack()
+            pady=(0, 12),
+        )
 
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def execute():
             execute_button.config(state="disabled")
@@ -2622,19 +2531,13 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        execute_button = self._add_dialog_button(
             button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=10,
-        ).pack(side=tk.RIGHT)
-        execute_button = tk.Button(
-            button_frame,
-            text="我已填好规则，执行批量删除",
-            command=execute,
-            font=("Microsoft YaHei", 10),
-            width=22,
+            "我已填好规则，执行批量删除",
+            execute,
+            primary=True,
+            width=230,
         )
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -2711,28 +2614,20 @@ class ExcelToolkitApp:
     def _confirm_link_replace_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title("批量更换多文件链接")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
+        dialog, card = self._create_dialog_card("批量更换多文件链接")
 
-        tk.Label(
-            dialog,
-            text=(
+        self._add_dialog_message(
+            card,
+            (
                 "规则表已打开。\n"
                 "请在【链接清单】D列填写新链接路径，E列可填写是否执行，\n"
                 "保存并关闭/释放规则表后，再点击执行。"
             ),
-            font=("Microsoft YaHei", 11),
             wraplength=420,
-            justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+            pady=(0, 12),
+        )
 
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def execute():
             execute_button.config(state="disabled")
@@ -2783,19 +2678,13 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        execute_button = self._add_dialog_button(
             button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=10,
-        ).pack(side=tk.RIGHT)
-        execute_button = tk.Button(
-            button_frame,
-            text="我已填好规则，执行批量更换多文件链接",
-            command=execute,
-            font=("Microsoft YaHei", 10),
-            width=32,
+            "我已填好规则，执行批量更换多文件链接",
+            execute,
+            primary=True,
+            width=320,
         )
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -2817,28 +2706,20 @@ class ExcelToolkitApp:
     def _confirm_sheet_rename_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title("批量重命名工作表")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
+        dialog, card = self._create_dialog_card("批量重命名工作表")
 
-        tk.Label(
-            dialog,
-            text=(
+        self._add_dialog_message(
+            card,
+            (
                 "规则表已打开。\n"
                 "请在【重命名清单】D列填写新工作表名，\n"
                 "保存并关闭/释放规则表后，再点击执行。"
             ),
-            font=("Microsoft YaHei", 11),
             wraplength=400,
-            justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+            pady=(0, 12),
+        )
 
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def execute():
             execute_button.config(state="disabled")
@@ -2907,19 +2788,13 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        execute_button = self._add_dialog_button(
             button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=10,
-        ).pack(side=tk.RIGHT)
-        execute_button = tk.Button(
-            button_frame,
-            text="我已填好规则，执行批量重命名工作表",
-            command=execute,
-            font=("Microsoft YaHei", 10),
-            width=32,
+            "我已填好规则，执行批量重命名工作表",
+            execute,
+            primary=True,
+            width=320,
         )
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -3028,28 +2903,20 @@ class ExcelToolkitApp:
     def _confirm_rename_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title("批量重命名文件")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
+        dialog, card = self._create_dialog_card("批量重命名文件")
 
-        tk.Label(
-            dialog,
-            text=(
+        self._add_dialog_message(
+            card,
+            (
                 "规则表已打开。\n"
                 "请在【重命名清单】中填写新文件名和后缀名，\n"
                 "保存并关闭/释放规则表后，再点击执行。"
             ),
-            font=("Microsoft YaHei", 11),
             wraplength=400,
-            justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+            pady=(0, 12),
+        )
 
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
+        button_frame = self._create_dialog_button_bar(card)
 
         def execute():
             execute_button.config(state="disabled")
@@ -3131,19 +2998,13 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(
+        self._add_dialog_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        execute_button = self._add_dialog_button(
             button_frame,
-            text="取消",
-            command=cancel,
-            font=("Microsoft YaHei", 10),
-            width=10,
-        ).pack(side=tk.RIGHT)
-        execute_button = tk.Button(
-            button_frame,
-            text="我已填好规则，执行批量重命名",
-            command=execute,
-            font=("Microsoft YaHei", 10),
-            width=28,
+            "我已填好规则，执行批量重命名",
+            execute,
+            primary=True,
+            width=260,
         )
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
