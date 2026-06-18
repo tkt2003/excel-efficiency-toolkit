@@ -338,6 +338,8 @@ class ExcelToolkitApp:
                 panel = self._create_section_panel(column_frame, section_name, groups[section_name])
                 panel.grid(row=row, column=0, sticky="ew", pady=(0, 8))
 
+        feature_area.grid_rowconfigure(1, minsize=14)
+
     def _create_section_panel(self, parent, title, features):
         panel = ctk.CTkFrame(
             parent,
@@ -357,7 +359,7 @@ class ExcelToolkitApp:
 
         for row, (feature_title, description, attr_name, command) in enumerate(features, start=1):
             card = self._create_feature_card(panel, feature_title, description, attr_name, command)
-            card.grid(row=row, column=0, sticky="ew", padx=10, pady=(0, 6))
+            card.grid(row=row, column=0, sticky="ew", padx=10, pady=(0, 9))
 
         return panel
 
@@ -365,7 +367,7 @@ class ExcelToolkitApp:
         has_description = bool(description)
         card = ctk.CTkFrame(
             parent,
-            height=58 if has_description else 46,
+            height=70 if has_description else 50,
             fg_color="#fbfdff",
             border_width=1,
             border_color=self.border_color,
@@ -386,7 +388,7 @@ class ExcelToolkitApp:
             column=0,
             sticky="ew",
             padx=(12, 8),
-            pady=(7, 0) if has_description else (0, 0),
+            pady=(8, 1) if has_description else (0, 0),
         )
         widgets = [card, title_label]
         desc_label = None
@@ -399,7 +401,7 @@ class ExcelToolkitApp:
                 anchor="w",
                 justify="left",
             )
-            desc_label.grid(row=1, column=0, sticky="ew", padx=(12, 8), pady=(0, 6))
+            desc_label.grid(row=1, column=0, sticky="ew", padx=(12, 8), pady=(1, 10))
             widgets.append(desc_label)
         else:
             card.grid_rowconfigure(0, weight=1)
