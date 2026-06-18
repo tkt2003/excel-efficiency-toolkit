@@ -139,10 +139,8 @@ class ExcelToolkitApp:
         self.accent_soft_color = "#dbeafe"
         self.card_hover_color = "#f1f6fb"
         self.card_disabled_color = "#f8fafc"
-        self.nav_buttons = {}
         self.feature_buttons = {}
         self.feature_cards = {}
-        self.current_group = None
         self.root.configure(fg_color=self.bg_color)
 
         self.main_frame = ctk.CTkFrame(root, fg_color=self.bg_color, corner_radius=0)
@@ -163,31 +161,13 @@ class ExcelToolkitApp:
     def _feature_groups(self):
         return [
             (
-                "文件整理",
+                "拆分导出",
                 [
                     (
-                        "一簿按工作表拆分为多个文件",
-                        "按工作表拆分成独立 Excel 文件",
+                        "按工作表拆分文件",
+                        "把一个 Excel 文件按工作表拆成多个文件",
                         "btn_export_sheets",
                         self.run_export_sheets,
-                    ),
-                    (
-                        "多簿到一簿",
-                        "把多个工作簿导入到一个目标工作簿",
-                        "btn_merge_workbooks",
-                        self.run_merge_workbooks,
-                    ),
-                    ("批量重命名文件", "按规则表批量修改文件名", "btn_rename_files", self.run_batch_rename_files),
-                ],
-            ),
-            (
-                "工作表处理",
-                [
-                    (
-                        "多表合并到一个新表",
-                        "把多个工作表追加合并到一个结果表",
-                        "btn_merge_sheets",
-                        self.run_merge_sheets,
                     ),
                     (
                         "按指定列拆分工作表",
@@ -195,30 +175,28 @@ class ExcelToolkitApp:
                         "btn_split_sheet",
                         self.run_split_sheet,
                     ),
+                ],
+            ),
+            (
+                "合并整理",
+                [
                     (
-                        "生成带链接的工作表目录",
-                        "生成可点击跳转的工作表目录",
-                        "btn_sheet_index",
-                        self.run_sheet_index,
+                        "多表合并到一表",
+                        "把多个工作表追加合并到一个结果表",
+                        "btn_merge_sheets",
+                        self.run_merge_sheets,
                     ),
-                    ("批量删除工作表", "按规则批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
                     (
-                        "批量重命名工作表",
-                        "按规则表批量修改工作表名",
-                        "btn_rename_sheets",
-                        self.run_batch_rename_sheets,
+                        "多文件合并到一个文件",
+                        "把多个 Excel 文件导入到一个目标文件",
+                        "btn_merge_workbooks",
+                        self.run_merge_workbooks,
                     ),
                 ],
             ),
             (
-                "模板 / 取数 / 链接",
+                "模板生成 / 取数",
                 [
-                    (
-                        "批量更换多文件链接",
-                        "批量替换多个 Excel 文件中的外部链接",
-                        "btn_link_replace",
-                        self.run_batch_link_replace,
-                    ),
                     (
                         "按颜色汇总求和",
                         "按填充色位置从多个文件汇总取数",
@@ -248,6 +226,36 @@ class ExcelToolkitApp:
                         "对当前选区公式套用 ROUND 两位",
                         "btn_round_formula",
                         self.run_round_formula,
+                    ),
+                ],
+            ),
+            (
+                "目录与检查",
+                [
+                    (
+                        "生成带链接的工作表目录",
+                        "生成可点击跳转的工作表目录",
+                        "btn_sheet_index",
+                        self.run_sheet_index,
+                    ),
+                ],
+            ),
+            (
+                "批量维护",
+                [
+                    (
+                        "批量更换多文件链接",
+                        "批量替换多个 Excel 文件中的外部链接",
+                        "btn_link_replace",
+                        self.run_batch_link_replace,
+                    ),
+                    ("批量删除工作表", "按规则批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
+                    ("批量重命名文件", "按规则表批量修改文件名", "btn_rename_files", self.run_batch_rename_files),
+                    (
+                        "批量重命名工作表",
+                        "按规则表批量修改工作表名",
+                        "btn_rename_sheets",
+                        self.run_batch_rename_sheets,
                     ),
                 ],
             ),
@@ -301,112 +309,56 @@ class ExcelToolkitApp:
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
     def _create_feature_area(self, parent):
-        feature_area = ctk.CTkFrame(parent, fg_color="transparent")
-        feature_area.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
-        feature_area.grid_columnconfigure(1, weight=1)
-        feature_area.grid_rowconfigure(0, weight=1)
-
-        nav_panel = ctk.CTkFrame(
-            feature_area,
-            fg_color=self.panel_color,
-            corner_radius=12,
-            border_width=1,
-            border_color="#dce6f1",
-            width=208,
+        feature_area = ctk.CTkScrollableFrame(
+            parent,
+            fg_color="transparent",
+            scrollbar_button_color="#cbd5e1",
+            scrollbar_button_hover_color="#94a3b8",
         )
-        nav_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
-        nav_panel.grid_propagate(False)
-        nav_panel.grid_columnconfigure(0, weight=1)
+        feature_area.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
+        feature_area.grid_columnconfigure(0, weight=1, uniform="feature_columns")
+        feature_area.grid_columnconfigure(1, weight=1, uniform="feature_columns")
 
-        ctk.CTkLabel(
-            nav_panel,
-            text="功能分组",
-            font=("Microsoft YaHei", 12, "bold"),
-            text_color=self.text_color,
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(18, 10))
+        groups = dict(self._feature_groups())
+        left_sections = ("拆分导出", "合并整理", "模板生成 / 取数")
+        right_sections = ("目录与检查", "批量维护")
 
-        for row_index, (group_name, _) in enumerate(self._feature_groups(), start=1):
-            button = AppButton(
-                nav_panel,
-                text=group_name,
-                font=("Microsoft YaHei", 10, "bold"),
-                command=lambda name=group_name: self._show_feature_group(name),
-                width=176,
-                height=40,
-                anchor="w",
-                fg_color="transparent",
-                hover_color="#dcebf8",
-                text_color=self.text_color,
-                corner_radius=8,
-            )
-            button.grid(row=row_index, column=0, sticky="ew", padx=14, pady=(0, 8))
-            self.nav_buttons[group_name] = button
+        for column, section_names in enumerate((left_sections, right_sections)):
+            column_frame = ctk.CTkFrame(feature_area, fg_color="transparent")
+            column_frame.grid(row=0, column=column, sticky="new", padx=(0, 12) if column == 0 else (0, 0))
+            column_frame.grid_columnconfigure(0, weight=1)
 
-        self.feature_content = ctk.CTkFrame(
-            feature_area,
+            for row, section_name in enumerate(section_names):
+                panel = self._create_section_panel(column_frame, section_name, groups[section_name])
+                panel.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+
+    def _create_section_panel(self, parent, title, features):
+        panel = ctk.CTkFrame(
+            parent,
             fg_color=self.card_color,
             corner_radius=12,
             border_width=1,
             border_color="#e5edf5",
         )
-        self.feature_content.grid(row=0, column=1, sticky="nsew")
-        for column in range(3):
-            self.feature_content.grid_columnconfigure(column, weight=0, minsize=278)
+        panel.grid_columnconfigure(0, weight=1)
 
-        self._show_feature_group("模板 / 取数 / 链接")
-
-    def _show_feature_group(self, group_name):
-        for child in self.feature_content.winfo_children():
-            child.destroy()
-
-        self.current_group = group_name
-        for name, button in self.nav_buttons.items():
-            button.configure(
-                fg_color=self.accent_soft_color if name == group_name else "transparent",
-                text_color=self.accent_color if name == group_name else self.text_color,
-                border_width=1 if name == group_name else 0,
-                border_color="#bfd7f0" if name == group_name else self.panel_color,
-            )
-
-        group_descriptions = {
-            "文件整理": "文件拆分、合并、重命名等常用整理工具",
-            "工作表处理": "工作表合并、拆分、目录、删除和重命名",
-            "模板 / 取数 / 链接": "外部链接、按颜色取数、穿透查询和模板批量生成",
-        }
-        header = ctk.CTkFrame(self.feature_content, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=20, pady=(16, 12))
-        header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            header,
-            text=group_name,
-            font=("Microsoft YaHei", 18, "bold"),
+            panel,
+            text=title,
+            font=("Microsoft YaHei", 14, "bold"),
             text_color=self.text_color,
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            header,
-            text=group_descriptions[group_name],
-            font=("Microsoft YaHei", 10),
-            text_color=self.muted_text_color,
-        ).grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ).grid(row=0, column=0, sticky="w", padx=14, pady=(12, 8))
 
-        features = dict(self._feature_groups())[group_name]
-        for index, (title, description, attr_name, command) in enumerate(features):
-            row = index // 3 + 1
-            column = index % 3
-            card = self._create_feature_card(self.feature_content, title, description, attr_name, command)
-            card.grid(
-                row=row,
-                column=column,
-                sticky="nw",
-                padx=(20 if column == 0 else 0, 12),
-                pady=(0, 12),
-            )
+        for row, (feature_title, description, attr_name, command) in enumerate(features, start=1):
+            card = self._create_feature_card(panel, feature_title, description, attr_name, command)
+            card.grid(row=row, column=0, sticky="ew", padx=12, pady=(0, 8))
+
+        return panel
 
     def _create_feature_card(self, parent, title, description, attr_name, command):
         card = ctk.CTkFrame(
             parent,
-            width=278,
-            height=90,
+            height=62,
             fg_color="#fbfdff",
             border_width=1,
             border_color=self.border_color,
@@ -414,26 +366,32 @@ class ExcelToolkitApp:
         )
         card.grid_propagate(False)
         card.grid_columnconfigure(0, weight=1)
-        card.grid_rowconfigure(1, weight=1)
 
         title_label = ctk.CTkLabel(
             card,
             text=title,
-            font=("Microsoft YaHei", 13, "bold"),
+            font=("Microsoft YaHei", 12, "bold"),
             text_color=self.text_color,
             anchor="w",
         )
-        title_label.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 2))
+        title_label.grid(row=0, column=0, sticky="ew", padx=(14, 8), pady=(8, 0))
+        arrow_label = ctk.CTkLabel(
+            card,
+            text="›",
+            font=("Microsoft YaHei", 18, "bold"),
+            text_color=self.muted_text_color,
+            width=18,
+        )
+        arrow_label.grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 14))
         desc_label = ctk.CTkLabel(
             card,
             text=description,
-            font=("Microsoft YaHei", 10),
+            font=("Microsoft YaHei", 9),
             text_color=self.muted_text_color,
             anchor="w",
             justify="left",
-            wraplength=240,
         )
-        desc_label.grid(row=1, column=0, sticky="new", padx=16, pady=(0, 8))
+        desc_label.grid(row=1, column=0, sticky="ew", padx=(14, 8), pady=(0, 7))
 
         def set_state(state):
             is_disabled = state == "disabled"
@@ -443,6 +401,7 @@ class ExcelToolkitApp:
             )
             title_label.configure(text_color=self.subtle_text_color if is_disabled else self.text_color)
             desc_label.configure(text_color=self.subtle_text_color if is_disabled else self.muted_text_color)
+            arrow_label.configure(text_color=self.subtle_text_color if is_disabled else self.muted_text_color)
             if is_disabled:
                 card._feature_enabled = False
             else:
@@ -453,7 +412,7 @@ class ExcelToolkitApp:
         setattr(self, attr_name, handle)
         self.feature_buttons[attr_name] = handle
         self.feature_cards[attr_name] = card
-        self._bind_card_action(card, command, [card, title_label, desc_label])
+        self._bind_card_action(card, command, [card, title_label, desc_label, arrow_label])
         return card
 
     def _bind_card_action(self, card, command, widgets):
@@ -484,9 +443,9 @@ class ExcelToolkitApp:
     def _run_gui_smoke_and_exit(self):
         try:
             self._log_info("GUI 冒烟：开始检查关键入口。")
-            for group_name in self.nav_buttons:
-                self._show_feature_group(group_name)
-                self._flush_ui()
+            for card in self.feature_cards.values():
+                if not getattr(card, "_feature_enabled", True):
+                    raise RuntimeError("GUI 冒烟：存在不可用功能卡片。")
 
             for dialog_callback in (self.show_about, self.run_data_drill, self.run_template_generate, self.run_clear_by_color):
                 dialog_callback()
@@ -502,7 +461,7 @@ class ExcelToolkitApp:
             corner_radius=12,
             border_width=1,
             border_color="#e5edf5",
-            height=178,
+            height=146,
         )
         self.frame_bottom.grid(row=2, column=0, sticky="nsew")
         self.frame_bottom.grid_propagate(False)
@@ -519,7 +478,7 @@ class ExcelToolkitApp:
         self.log_text = ctk.CTkTextbox(
             self.frame_bottom,
             state="disabled",
-            height=132,
+            height=104,
             font=("Consolas", 10),
             fg_color="#f8fafc",
             text_color="#111827",
