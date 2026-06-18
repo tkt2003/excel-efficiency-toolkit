@@ -104,26 +104,49 @@ class AppButton(ctk.CTkButton):
     configure = ctk.CTkButton.configure
 
 
+class FeatureCardHandle:
+    def __init__(self, set_state):
+        self._set_state = set_state
+
+    def config(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        return self.configure(**kwargs)
+
+    def configure(self, **kwargs):
+        state = kwargs.get("state")
+        if state is not None:
+            try:
+                self._set_state(state)
+            except tk.TclError:
+                return None
+
+
 class ExcelToolkitApp:
     def __init__(self, root):
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("1080x780")
-        self.root.minsize(960, 700)
-        self.bg_color = "#f4f7fb"
+        self.root.geometry("1180x760")
+        self.root.minsize(1120, 700)
+        self.bg_color = "#f3f6fa"
         self.card_color = "#ffffff"
-        self.panel_color = "#eef3f8"
-        self.border_color = "#d9e1ea"
+        self.panel_color = "#eaf0f7"
+        self.border_color = "#d8e0ea"
         self.text_color = "#1f2937"
         self.muted_text_color = "#64748b"
-        self.accent_color = "#2563eb"
+        self.subtle_text_color = "#94a3b8"
+        self.accent_color = "#3b6ea8"
+        self.accent_soft_color = "#dbeafe"
+        self.card_hover_color = "#f1f6fb"
+        self.card_disabled_color = "#f8fafc"
         self.nav_buttons = {}
         self.feature_buttons = {}
+        self.feature_cards = {}
         self.current_group = None
         self.root.configure(fg_color=self.bg_color)
 
         self.main_frame = ctk.CTkFrame(root, fg_color=self.bg_color, corner_radius=0)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=18, pady=14)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(1, weight=1)
 
@@ -188,8 +211,14 @@ class ExcelToolkitApp:
                 ],
             ),
             (
-                "模板生成 / 取数",
+                "模板 / 取数 / 链接",
                 [
+                    (
+                        "批量更换多文件链接",
+                        "批量替换多个 Excel 文件中的外部链接",
+                        "btn_link_replace",
+                        self.run_batch_link_replace,
+                    ),
                     (
                         "按颜色汇总求和",
                         "按填充色位置从多个文件汇总取数",
@@ -222,68 +251,71 @@ class ExcelToolkitApp:
                     ),
                 ],
             ),
-            (
-                "批量维护",
-                [
-                    (
-                        "批量更换多文件链接",
-                        "批量替换多个 Excel 文件中的外部链接",
-                        "btn_link_replace",
-                        self.run_batch_link_replace,
-                    ),
-                ],
-            ),
         ]
 
     def _create_header(self, parent):
-        header = ctk.CTkFrame(parent, fg_color=self.card_color, corner_radius=8)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        header = ctk.CTkFrame(
+            parent,
+            fg_color=self.card_color,
+            corner_radius=12,
+            border_width=1,
+            border_color="#e5edf5",
+        )
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         header.grid_columnconfigure(0, weight=1)
 
         title_block = ctk.CTkFrame(header, fg_color="transparent")
-        title_block.grid(row=0, column=0, sticky="ew", padx=16, pady=14)
+        title_block.grid(row=0, column=0, sticky="ew", padx=20, pady=14)
         title_block.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
             title_block,
             text=APP_TITLE,
-            font=("Microsoft YaHei", 18, "bold"),
+            font=("Microsoft YaHei", 20, "bold"),
             text_color=self.text_color,
         ).grid(row=0, column=0, sticky="w")
 
         help_buttons = ctk.CTkFrame(title_block, fg_color="transparent")
-        help_buttons.grid(row=0, column=1, sticky="e")
+        help_buttons.grid(row=0, column=1, rowspan=2, sticky="e")
         for index, (text, command) in enumerate((("使用说明", self.show_user_guide), ("关于", self.show_about))):
             AppButton(
                 help_buttons,
                 text=text,
                 font=("Microsoft YaHei", 9),
                 command=command,
-                width=78,
-                height=30,
+                width=76,
+                height=28,
                 fg_color="#f8fafc",
-                hover_color="#e9eef5",
+                hover_color="#eef4fb",
                 text_color=self.text_color,
                 border_width=1,
-                border_color=self.border_color,
+                border_color="#dfe7f1",
                 corner_radius=6,
             ).grid(row=0, column=index, padx=(6, 0))
 
         ctk.CTkLabel(
             title_block,
-            text="请选择需要执行的功能。多数功能不自动保存；会保存目标文件的功能会在执行前提示。",
+            text="审计、财务、报表整理常用 Excel 工具台",
             font=("Microsoft YaHei", 10),
             text_color=self.muted_text_color,
-        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
     def _create_feature_area(self, parent):
         feature_area = ctk.CTkFrame(parent, fg_color="transparent")
-        feature_area.grid(row=1, column=0, sticky="nsew", pady=(0, 12))
+        feature_area.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
         feature_area.grid_columnconfigure(1, weight=1)
         feature_area.grid_rowconfigure(0, weight=1)
 
-        nav_panel = ctk.CTkFrame(feature_area, fg_color=self.panel_color, corner_radius=8)
-        nav_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
+        nav_panel = ctk.CTkFrame(
+            feature_area,
+            fg_color=self.panel_color,
+            corner_radius=12,
+            border_width=1,
+            border_color="#dce6f1",
+            width=208,
+        )
+        nav_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        nav_panel.grid_propagate(False)
         nav_panel.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -291,31 +323,37 @@ class ExcelToolkitApp:
             text="功能分组",
             font=("Microsoft YaHei", 12, "bold"),
             text_color=self.text_color,
-        ).grid(row=0, column=0, sticky="w", padx=14, pady=(14, 8))
+        ).grid(row=0, column=0, sticky="w", padx=16, pady=(18, 10))
 
         for row_index, (group_name, _) in enumerate(self._feature_groups(), start=1):
             button = AppButton(
                 nav_panel,
                 text=group_name,
-                font=("Microsoft YaHei", 10),
+                font=("Microsoft YaHei", 10, "bold"),
                 command=lambda name=group_name: self._show_feature_group(name),
-                width=150,
-                height=36,
+                width=176,
+                height=40,
                 anchor="w",
                 fg_color="transparent",
-                hover_color="#dbeafe",
+                hover_color="#dcebf8",
                 text_color=self.text_color,
-                corner_radius=6,
+                corner_radius=8,
             )
-            button.grid(row=row_index, column=0, sticky="ew", padx=10, pady=(0, 6))
+            button.grid(row=row_index, column=0, sticky="ew", padx=14, pady=(0, 8))
             self.nav_buttons[group_name] = button
 
-        self.feature_content = ctk.CTkFrame(feature_area, fg_color=self.card_color, corner_radius=8)
+        self.feature_content = ctk.CTkFrame(
+            feature_area,
+            fg_color=self.card_color,
+            corner_radius=12,
+            border_width=1,
+            border_color="#e5edf5",
+        )
         self.feature_content.grid(row=0, column=1, sticky="nsew")
-        self.feature_content.grid_columnconfigure(0, weight=1)
-        self.feature_content.grid_columnconfigure(1, weight=1)
+        for column in range(3):
+            self.feature_content.grid_columnconfigure(column, weight=0, minsize=278)
 
-        self._show_feature_group(self._feature_groups()[0][0])
+        self._show_feature_group("模板 / 取数 / 链接")
 
     def _show_feature_group(self, group_name):
         for child in self.feature_content.winfo_children():
@@ -324,76 +362,124 @@ class ExcelToolkitApp:
         self.current_group = group_name
         for name, button in self.nav_buttons.items():
             button.configure(
-                fg_color=self.accent_color if name == group_name else "transparent",
-                text_color="#ffffff" if name == group_name else self.text_color,
+                fg_color=self.accent_soft_color if name == group_name else "transparent",
+                text_color=self.accent_color if name == group_name else self.text_color,
+                border_width=1 if name == group_name else 0,
+                border_color="#bfd7f0" if name == group_name else self.panel_color,
             )
 
+        group_descriptions = {
+            "文件整理": "文件拆分、合并、重命名等常用整理工具",
+            "工作表处理": "工作表合并、拆分、目录、删除和重命名",
+            "模板 / 取数 / 链接": "外部链接、按颜色取数、穿透查询和模板批量生成",
+        }
+        header = ctk.CTkFrame(self.feature_content, fg_color="transparent")
+        header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=20, pady=(16, 12))
+        header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            self.feature_content,
+            header,
             text=group_name,
-            font=("Microsoft YaHei", 16, "bold"),
+            font=("Microsoft YaHei", 18, "bold"),
             text_color=self.text_color,
-        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=(16, 10))
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            header,
+            text=group_descriptions[group_name],
+            font=("Microsoft YaHei", 10),
+            text_color=self.muted_text_color,
+        ).grid(row=1, column=0, sticky="w", pady=(5, 0))
 
         features = dict(self._feature_groups())[group_name]
         for index, (title, description, attr_name, command) in enumerate(features):
-            row = index // 2 + 1
-            column = index % 2
+            row = index // 3 + 1
+            column = index % 3
             card = self._create_feature_card(self.feature_content, title, description, attr_name, command)
-            card.grid(row=row, column=column, sticky="nsew", padx=(18, 9) if column == 0 else (9, 18), pady=(0, 12))
+            card.grid(
+                row=row,
+                column=column,
+                sticky="nw",
+                padx=(20 if column == 0 else 0, 12),
+                pady=(0, 12),
+            )
 
     def _create_feature_card(self, parent, title, description, attr_name, command):
         card = ctk.CTkFrame(
             parent,
+            width=278,
+            height=90,
             fg_color="#fbfdff",
             border_width=1,
             border_color=self.border_color,
-            corner_radius=8,
+            corner_radius=10,
         )
+        card.grid_propagate(False)
         card.grid_columnconfigure(0, weight=1)
+        card.grid_rowconfigure(1, weight=1)
 
-        ctk.CTkLabel(
+        title_label = ctk.CTkLabel(
             card,
             text=title,
-            font=("Microsoft YaHei", 12, "bold"),
+            font=("Microsoft YaHei", 13, "bold"),
             text_color=self.text_color,
             anchor="w",
-        ).grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 2))
-        ctk.CTkLabel(
+        )
+        title_label.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 2))
+        desc_label = ctk.CTkLabel(
             card,
             text=description,
             font=("Microsoft YaHei", 10),
             text_color=self.muted_text_color,
             anchor="w",
             justify="left",
-            wraplength=330,
-        ).grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 10))
-        button = AppButton(
-            card,
-            text="打开",
-            font=("Microsoft YaHei", 10),
-            command=command,
-            width=72,
-            height=30,
-            fg_color=self.accent_color,
-            hover_color="#1d4ed8",
-            text_color="#ffffff",
-            corner_radius=6,
+            wraplength=240,
         )
-        button.grid(row=2, column=0, sticky="w", padx=14, pady=(0, 12))
-        setattr(self, attr_name, button)
-        self.feature_buttons[attr_name] = button
-        self._bind_card_action(card, command)
+        desc_label.grid(row=1, column=0, sticky="new", padx=16, pady=(0, 8))
+
+        def set_state(state):
+            is_disabled = state == "disabled"
+            card.configure(
+                fg_color=self.card_disabled_color if is_disabled else "#fbfdff",
+                border_color="#e5eaf0" if is_disabled else self.border_color,
+            )
+            title_label.configure(text_color=self.subtle_text_color if is_disabled else self.text_color)
+            desc_label.configure(text_color=self.subtle_text_color if is_disabled else self.muted_text_color)
+            if is_disabled:
+                card._feature_enabled = False
+            else:
+                card._feature_enabled = True
+
+        card._feature_enabled = True
+        handle = FeatureCardHandle(set_state)
+        setattr(self, attr_name, handle)
+        self.feature_buttons[attr_name] = handle
+        self.feature_cards[attr_name] = card
+        self._bind_card_action(card, command, [card, title_label, desc_label])
         return card
 
-    def _bind_card_action(self, widget, command):
-        widget.bind("<Button-1>", lambda event: command())
-        for child in widget.winfo_children():
-            if isinstance(child, AppButton):
-                continue
-            child.bind("<Button-1>", lambda event: command())
-            if child.winfo_children():
-                self._bind_card_action(child, command)
+    def _bind_card_action(self, card, command, widgets):
+        def is_enabled():
+            return getattr(card, "_feature_enabled", True)
+
+        def run_action(event=None):
+            if is_enabled():
+                command()
+
+        def on_enter(event=None):
+            if is_enabled():
+                card.configure(fg_color=self.card_hover_color, border_color="#c9d9ea")
+
+        def on_leave(event=None):
+            if is_enabled():
+                card.configure(fg_color="#fbfdff", border_color=self.border_color)
+
+        for widget in widgets:
+            widget.bind("<Button-1>", run_action)
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+            try:
+                widget.configure(cursor="hand2")
+            except tk.TclError:
+                pass
 
     def _run_gui_smoke_and_exit(self):
         try:
@@ -405,42 +491,44 @@ class ExcelToolkitApp:
             for dialog_callback in (self.show_about, self.run_data_drill, self.run_template_generate, self.run_clear_by_color):
                 dialog_callback()
                 self._flush_ui()
-
-            guide_path = self._find_user_guide_path()
-            if guide_path:
-                self._log_info(f"GUI 冒烟：使用说明路径存在：{guide_path}")
-            else:
-                self._log_info("GUI 冒烟：未找到使用说明，将使用内置说明。")
             self._log_info("GUI 冒烟：完成。")
         finally:
             self.root.after(200, self.root.destroy)
 
     def _create_log_area(self, parent):
-        self.frame_bottom = ctk.CTkFrame(parent, fg_color=self.card_color, corner_radius=8)
+        self.frame_bottom = ctk.CTkFrame(
+            parent,
+            fg_color=self.card_color,
+            corner_radius=12,
+            border_width=1,
+            border_color="#e5edf5",
+            height=178,
+        )
         self.frame_bottom.grid(row=2, column=0, sticky="nsew")
+        self.frame_bottom.grid_propagate(False)
         self.frame_bottom.grid_columnconfigure(0, weight=1)
         self.frame_bottom.grid_rowconfigure(1, weight=1)
 
         ctk.CTkLabel(
             self.frame_bottom,
             text="运行日志",
-            font=("Microsoft YaHei", 11, "bold"),
+            font=("Microsoft YaHei", 12, "bold"),
             text_color=self.text_color,
-        ).grid(row=0, column=0, sticky="w", padx=14, pady=(12, 4))
+        ).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 6))
 
         self.log_text = ctk.CTkTextbox(
             self.frame_bottom,
             state="disabled",
-            height=8,
+            height=132,
             font=("Consolas", 10),
-            fg_color="#ffffff",
+            fg_color="#f8fafc",
             text_color="#111827",
             border_width=1,
             border_color=self.border_color,
-            corner_radius=6,
+            corner_radius=8,
             wrap="word",
         )
-        self.log_text.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
+        self.log_text.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 14))
 
     def _get_project_root(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
