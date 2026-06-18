@@ -689,6 +689,7 @@ class ExcelToolkitApp:
         final_height = height or max(requested_height, min_height or 1)
         self._center_window(dialog, width=final_width, height=final_height)
         dialog.deiconify()
+        self._balance_dialog_outer_padding(dialog, final_width, height is not None)
         dialog.lift()
         try:
             dialog.attributes("-topmost", True)
@@ -704,6 +705,40 @@ class ExcelToolkitApp:
                 focus_widget.focus_set()
             except tk.TclError:
                 pass
+
+    def _balance_dialog_outer_padding(self, dialog, width, keep_explicit_height=False):
+        if keep_explicit_height:
+            return
+        card = getattr(dialog, "_dialog_card", None)
+        if card is None:
+            return
+
+        for _ in range(3):
+            dialog.update_idletasks()
+            if not card.winfo_exists():
+                return
+            top_gap = card.winfo_y()
+            card_height = card.winfo_height()
+            window_height = dialog.winfo_height()
+            bottom_gap = window_height - top_gap - card_height
+            excess_gap = bottom_gap - top_gap
+            if excess_gap <= 8:
+                return
+
+            geometry_size = dialog.geometry().split("+", 1)[0]
+            try:
+                _, geometry_height_text = geometry_size.split("x", 1)
+                geometry_height = int(geometry_height_text)
+            except (ValueError, IndexError):
+                return
+            if geometry_height <= 1 or window_height <= 1:
+                return
+
+            height_scale = window_height / geometry_height
+            next_height = max(1, int(round(geometry_height - excess_gap / height_scale)))
+            if next_height >= geometry_height:
+                return
+            self._center_window(dialog, width=width, height=next_height)
 
     def _schedule_smoke_dialog_close(self, dialog, close_callback=None, delay_ms=250):
         if os.environ.get("EXCEL_TOOLKIT_GUI_SMOKE") != "1":
