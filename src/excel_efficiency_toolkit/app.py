@@ -553,8 +553,8 @@ class ExcelToolkitApp:
                 "说明：面向审计、财务、报表整理场景的 Excel 效率工具\n"
                 "当前阶段：常用功能阶段性完成"
             ),
-            dialog_width=560,
-            dialog_height=300,
+            dialog_width=380,
+            dialog_height=220,
             wraplength=500,
         )
 
@@ -627,7 +627,7 @@ class ExcelToolkitApp:
         ctk.CTkLabel(
             card,
             text=title,
-            font=("Microsoft YaHei", 15, "bold"),
+            font=("Microsoft YaHei", 22, "bold"),
             text_color=self.text_color,
         ).pack(anchor="w", padx=16, pady=(14, 8))
 
@@ -637,9 +637,10 @@ class ExcelToolkitApp:
         label = ctk.CTkLabel(
             parent,
             text=message,
-            font=("Microsoft YaHei", 12),
+            font=("Microsoft YaHei", 16),
             wraplength=wraplength,
             justify="left",
+            anchor="w",
             text_color=self.text_color,
         )
         label.pack(anchor="w", fill=tk.X, padx=16, pady=pady)
@@ -647,7 +648,7 @@ class ExcelToolkitApp:
 
     def _create_dialog_button_bar(self, parent):
         button_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        button_frame.pack(padx=16, pady=(8, 14), fill=tk.X)
+        button_frame.pack(padx=12, pady=(6, 14), fill=tk.X)
         return button_frame
 
     def _add_dialog_button(self, parent, text, command, primary=False, width=None):
@@ -656,9 +657,9 @@ class ExcelToolkitApp:
             parent,
             text=text,
             command=command,
-            font=("Microsoft YaHei", 11),
+            font=("Microsoft YaHei", 15),
             width=button_width,
-            height=34,
+            height=36,
             fg_color=self.accent_color if primary else "#f8fafc",
             hover_color="#1d4ed8" if primary else "#e9eef5",
             text_color="#ffffff" if primary else self.text_color,
@@ -797,7 +798,7 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        self._add_dialog_button(button_frame, "取消", lambda: choose(None)).pack(side=tk.RIGHT)
+        self._add_dialog_button(button_frame, "取消", lambda: choose(None), width=70).pack(side=tk.RIGHT)
 
         for label, value in reversed(choices):
             self._add_dialog_button(
@@ -805,7 +806,7 @@ class ExcelToolkitApp:
                 label,
                 lambda selected=value: choose(selected),
                 primary=True,
-                width=max(128, len(label) * 14 + 28),
+                width=min(max(128, len(label) * 10 + 36), 180),
             ).pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", lambda: choose(None))
@@ -871,7 +872,7 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
-        self._show_dialog_no_grab(dialog, width=760, height=360)
+        self._show_dialog_no_grab(dialog, width=500, height=260)
         self._schedule_smoke_dialog_close(dialog, cancel)
         self.root.wait_variable(done)
         return result["value"]
@@ -1375,9 +1376,9 @@ class ExcelToolkitApp:
                     ("仅汇总一个 sheet", "single"),
                     ("汇总所有匹配 sheet", "all"),
                 ],
-                dialog_width=720,
-                dialog_height=320,
-                wraplength=660,
+                dialog_width=460,
+                dialog_height=220,
+                wraplength=420,
             )
             if sum_scope is None:
                 self._log_info("用户已取消操作。")
@@ -1414,9 +1415,9 @@ class ExcelToolkitApp:
                     ("写入求和公式", "formula"),
                     ("只写入汇总数值", "value"),
                 ],
-                dialog_width=720,
-                dialog_height=320,
-                wraplength=660,
+                dialog_width=460,
+                dialog_height=220,
+                wraplength=420,
             )
             if write_mode is None:
                 self._log_info("用户已取消操作。")
@@ -1459,9 +1460,9 @@ class ExcelToolkitApp:
                     ("当前活动工作簿", "active"),
                     ("多个工作簿", "multi"),
                 ],
-                dialog_width=760,
-                dialog_height=360,
-                wraplength=700,
+                dialog_width=500,
+                dialog_height=260,
+                wraplength=460,
             )
             if mode is None:
                 self._log_info("用户已取消操作。")
@@ -1565,9 +1566,9 @@ class ExcelToolkitApp:
                     ("单文件数据穿透查询", "single"),
                     ("多文件数据穿透查询", "multi"),
                 ],
-                dialog_width=760,
-                dialog_height=380,
-                wraplength=700,
+                dialog_width=500,
+                dialog_height=260,
+                wraplength=460,
             )
             if mode is None:
                 self._log_info("用户已取消操作。")
@@ -1694,9 +1695,9 @@ class ExcelToolkitApp:
                 ("替换一个链接生成", "single"),
                 ("替换多个链接生成", "multi"),
             ],
-            dialog_width=780,
-            dialog_height=380,
-            wraplength=720,
+            dialog_width=520,
+            dialog_height=260,
+            wraplength=480,
         )
         if mode is None:
             self._log_info("用户已取消操作。")
@@ -1922,7 +1923,7 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
-        self._show_dialog_no_grab(dialog, width=820, height=420)
+        self._show_dialog_no_grab(dialog, width=540, height=300)
         self.root.wait_variable(done)
         return result["value"]
 
@@ -2134,7 +2135,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=760, height=340)
+        self._show_dialog_no_grab(dialog, width=500, height=240)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2594,7 +2595,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=320)
+        self._show_dialog_no_grab(dialog, width=460, height=220)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2748,7 +2749,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=760, height=340)
+        self._show_dialog_no_grab(dialog, width=500, height=240)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2865,7 +2866,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=320)
+        self._show_dialog_no_grab(dialog, width=460, height=220)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -3084,7 +3085,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=320)
+        self._show_dialog_no_grab(dialog, width=460, height=220)
         self.root.wait_variable(done)
         return result["execute"]
 
