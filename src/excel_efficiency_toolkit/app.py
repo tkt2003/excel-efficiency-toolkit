@@ -230,8 +230,14 @@ class ExcelToolkitApp:
                 ],
             ),
             (
-                "目录与检查",
+                "目录与链接",
                 [
+                    (
+                        "批量更换 Excel 链接",
+                        "批量替换多个 Excel 文件中的外部链接",
+                        "btn_link_replace",
+                        self.run_batch_link_replace,
+                    ),
                     (
                         "生成工作表目录",
                         "生成可点击跳转的工作表目录",
@@ -243,12 +249,6 @@ class ExcelToolkitApp:
             (
                 "批量维护",
                 [
-                    (
-                        "批量更换 Excel 链接",
-                        "批量替换多个 Excel 文件中的外部链接",
-                        "btn_link_replace",
-                        self.run_batch_link_replace,
-                    ),
                     ("批量删除工作表", "", "btn_delete_sheets", self.run_delete_sheets),
                     ("批量重命名文件", "", "btn_rename_files", self.run_batch_rename_files),
                     (
@@ -321,7 +321,7 @@ class ExcelToolkitApp:
 
         groups = dict(self._feature_groups())
         left_sections = ("拆分导出", "合并整理", "批量维护")
-        right_sections = ("模板生成 / 取数", "目录与检查")
+        right_sections = ("模板生成 / 取数", "目录与链接")
 
         for column, section_names in enumerate((left_sections, right_sections)):
             column_frame = ctk.CTkFrame(feature_area, fg_color="transparent")
