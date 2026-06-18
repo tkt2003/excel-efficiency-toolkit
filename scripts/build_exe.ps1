@@ -16,6 +16,7 @@ python -m PyInstaller `
   --onefile `
   --windowed `
   --name $AppName `
+  --collect-data customtkinter `
   --hidden-import win32com.client `
   --hidden-import pythoncom `
   --hidden-import pywintypes `

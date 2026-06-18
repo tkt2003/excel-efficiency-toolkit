@@ -1,8 +1,9 @@
 import os
 import sys
 import tkinter as tk
+import customtkinter as ctk
 from datetime import datetime
-from tkinter import filedialog, scrolledtext
+from tkinter import filedialog
 from .clear_by_color_ops import (
     clear_multiple_workbooks_by_color,
     execute_clear_active_workbook_plan,
@@ -85,21 +86,46 @@ APP_NAME = "老头表格助手"
 APP_VERSION = "0.1.0"
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
 
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
+
+
+class AppButton(ctk.CTkButton):
+    def config(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        try:
+            if not self.winfo_exists():
+                return None
+            return self.configure(**kwargs)
+        except tk.TclError:
+            return None
+
+    configure = ctk.CTkButton.configure
+
 
 class ExcelToolkitApp:
     def __init__(self, root):
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("860x800")
-        self.root.minsize(780, 760)
-        self.bg_color = "#f5f6f8"
+        self.root.geometry("1080x780")
+        self.root.minsize(960, 700)
+        self.bg_color = "#f4f7fb"
         self.card_color = "#ffffff"
-        self.border_color = "#d7dce2"
+        self.panel_color = "#eef3f8"
+        self.border_color = "#d9e1ea"
         self.text_color = "#1f2937"
-        self.root.configure(bg=self.bg_color)
+        self.muted_text_color = "#64748b"
+        self.accent_color = "#2563eb"
+        self.nav_buttons = {}
+        self.feature_buttons = {}
+        self.current_group = None
+        self.root.configure(fg_color=self.bg_color)
 
-        self.main_frame = tk.Frame(root, bg=self.bg_color)
+        self.main_frame = ctk.CTkFrame(root, fg_color=self.bg_color, corner_radius=0)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=18, pady=14)
+        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_rowconfigure(1, weight=1)
 
         self._create_header(self.main_frame)
         self._create_feature_area(self.main_frame)
@@ -108,178 +134,313 @@ class ExcelToolkitApp:
         # 初始化自定义 logger
         self.logger = setup_logger(self.log_text)
         self.logger.info(f"欢迎使用 {APP_TITLE}。程序已就绪。")
+        if os.environ.get("EXCEL_TOOLKIT_GUI_SMOKE") == "1":
+            self.root.after(300, self._run_gui_smoke_and_exit)
+
+    def _feature_groups(self):
+        return [
+            (
+                "文件整理",
+                [
+                    (
+                        "一簿按工作表拆分为多个文件",
+                        "按工作表拆分成独立 Excel 文件",
+                        "btn_export_sheets",
+                        self.run_export_sheets,
+                    ),
+                    (
+                        "多簿到一簿",
+                        "把多个工作簿导入到一个目标工作簿",
+                        "btn_merge_workbooks",
+                        self.run_merge_workbooks,
+                    ),
+                    ("批量重命名文件", "按规则表批量修改文件名", "btn_rename_files", self.run_batch_rename_files),
+                ],
+            ),
+            (
+                "工作表处理",
+                [
+                    (
+                        "多表合并到一个新表",
+                        "把多个工作表追加合并到一个结果表",
+                        "btn_merge_sheets",
+                        self.run_merge_sheets,
+                    ),
+                    (
+                        "按指定列拆分工作表",
+                        "按列值拆分成多个工作表",
+                        "btn_split_sheet",
+                        self.run_split_sheet,
+                    ),
+                    (
+                        "生成带链接的工作表目录",
+                        "生成可点击跳转的工作表目录",
+                        "btn_sheet_index",
+                        self.run_sheet_index,
+                    ),
+                    ("批量删除工作表", "按规则批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
+                    (
+                        "批量重命名工作表",
+                        "按规则表批量修改工作表名",
+                        "btn_rename_sheets",
+                        self.run_batch_rename_sheets,
+                    ),
+                ],
+            ),
+            (
+                "模板生成 / 取数",
+                [
+                    (
+                        "按颜色汇总求和",
+                        "按填充色位置从多个文件汇总取数",
+                        "btn_color_sum",
+                        self.run_color_sum,
+                    ),
+                    (
+                        "按颜色清空内容",
+                        "按填充色清空值和公式，保留格式",
+                        "btn_clear_by_color",
+                        self.run_clear_by_color,
+                    ),
+                    (
+                        "数据穿透查询",
+                        "查询同一单元格或区域在多个表/文件中的数据",
+                        "btn_data_drill",
+                        self.run_data_drill,
+                    ),
+                    (
+                        "按模板批量生成 Excel",
+                        "基于模板批量替换链接并生成文件",
+                        "btn_template_tb_report",
+                        self.run_template_generate,
+                    ),
+                    (
+                        "选区 ROUND 保留两位",
+                        "对当前选区公式套用 ROUND 两位",
+                        "btn_round_formula",
+                        self.run_round_formula,
+                    ),
+                ],
+            ),
+            (
+                "批量维护",
+                [
+                    (
+                        "批量更换多文件链接",
+                        "批量替换多个 Excel 文件中的外部链接",
+                        "btn_link_replace",
+                        self.run_batch_link_replace,
+                    ),
+                ],
+            ),
+        ]
 
     def _create_header(self, parent):
-        header = tk.Frame(parent, bg=self.bg_color)
-        header.pack(fill=tk.X, pady=(0, 10))
+        header = ctk.CTkFrame(parent, fg_color=self.card_color, corner_radius=8)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        header.grid_columnconfigure(0, weight=1)
 
-        title_row = tk.Frame(header, bg=self.bg_color)
-        title_row.pack(fill=tk.X)
+        title_block = ctk.CTkFrame(header, fg_color="transparent")
+        title_block.grid(row=0, column=0, sticky="ew", padx=16, pady=14)
+        title_block.grid_columnconfigure(0, weight=1)
 
-        tk.Label(
-            title_row,
-            text=APP_NAME,
+        ctk.CTkLabel(
+            title_block,
+            text=APP_TITLE,
             font=("Microsoft YaHei", 18, "bold"),
-            fg=self.text_color,
-            bg=self.bg_color,
-        ).pack(side=tk.LEFT, anchor="w")
+            text_color=self.text_color,
+        ).grid(row=0, column=0, sticky="w")
 
-        help_buttons = tk.Frame(title_row, bg=self.bg_color)
-        help_buttons.pack(side=tk.RIGHT, anchor="e")
-        for text, command in (("使用说明", self.show_user_guide), ("关于", self.show_about)):
-            tk.Button(
+        help_buttons = ctk.CTkFrame(title_block, fg_color="transparent")
+        help_buttons.grid(row=0, column=1, sticky="e")
+        for index, (text, command) in enumerate((("使用说明", self.show_user_guide), ("关于", self.show_about))):
+            AppButton(
                 help_buttons,
                 text=text,
                 font=("Microsoft YaHei", 9),
                 command=command,
-                width=8,
-                bg="#f8fafc",
-                fg=self.text_color,
-                activebackground="#e9eef5",
-                activeforeground=self.text_color,
-                relief="groove",
-                bd=1,
-                padx=4,
-                pady=2,
-            ).pack(side=tk.LEFT, padx=(6, 0))
+                width=78,
+                height=30,
+                fg_color="#f8fafc",
+                hover_color="#e9eef5",
+                text_color=self.text_color,
+                border_width=1,
+                border_color=self.border_color,
+                corner_radius=6,
+            ).grid(row=0, column=index, padx=(6, 0))
 
-        tk.Label(
-            header,
+        ctk.CTkLabel(
+            title_block,
             text="请选择需要执行的功能。多数功能不自动保存；会保存目标文件的功能会在执行前提示。",
             font=("Microsoft YaHei", 10),
-            fg="#5f6b7a",
-            bg=self.bg_color,
-        ).pack(anchor="w", pady=(3, 0))
+            text_color=self.muted_text_color,
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
     def _create_feature_area(self, parent):
-        feature_area = tk.Frame(parent, bg=self.bg_color)
-        feature_area.pack(fill=tk.X, pady=(0, 10))
-        feature_area.columnconfigure(0, weight=1, uniform="feature")
-        feature_area.columnconfigure(1, weight=1, uniform="feature")
+        feature_area = ctk.CTkFrame(parent, fg_color="transparent")
+        feature_area.grid(row=1, column=0, sticky="nsew", pady=(0, 12))
+        feature_area.grid_columnconfigure(1, weight=1)
+        feature_area.grid_rowconfigure(0, weight=1)
 
-        left_column = tk.Frame(feature_area, bg=self.bg_color)
-        right_column = tk.Frame(feature_area, bg=self.bg_color)
-        left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        right_column.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        nav_panel = ctk.CTkFrame(feature_area, fg_color=self.panel_color, corner_radius=8)
+        nav_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
+        nav_panel.grid_columnconfigure(0, weight=1)
 
-        self._create_feature_group(
-            left_column,
-            "拆分导出",
-            [
-                ("一簿按工作表拆分为多个文件", "btn_export_sheets", self.run_export_sheets),
-                ("按指定列拆分工作表", "btn_split_sheet", self.run_split_sheet),
-            ],
-        )
-        self._create_feature_group(
-            left_column,
-            "合并整理",
-            [
-                ("多表合并到一个新表", "btn_merge_sheets", self.run_merge_sheets),
-                ("多簿到一簿", "btn_merge_workbooks", self.run_merge_workbooks),
-            ],
-        )
-        self._create_feature_group(
-            left_column,
-            "模板生成 / 取数",
-            [
-                ("按颜色汇总求和", "btn_color_sum", self.run_color_sum),
-                ("按颜色清空内容", "btn_clear_by_color", self.run_clear_by_color),
-                ("数据穿透查询", "btn_data_drill", self.run_data_drill),
-                ("按模板批量生成 Excel", "btn_template_tb_report", self.run_template_generate),
-                ("选区 ROUND 保留两位", "btn_round_formula", self.run_round_formula),
-            ],
-        )
+        ctk.CTkLabel(
+            nav_panel,
+            text="功能分组",
+            font=("Microsoft YaHei", 12, "bold"),
+            text_color=self.text_color,
+        ).grid(row=0, column=0, sticky="w", padx=14, pady=(14, 8))
 
-        self._create_feature_group(
-            right_column,
-            "目录与检查",
-            [
-                ("生成带链接的工作表目录", "btn_sheet_index", self.run_sheet_index),
-            ],
-        )
-        self._create_feature_group(
-            right_column,
-            "批量维护",
-            [
-                ("批量更换多文件链接", "btn_link_replace", self.run_batch_link_replace),
-                ("批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
-                ("批量重命名文件", "btn_rename_files", self.run_batch_rename_files),
-                ("批量重命名工作表", "btn_rename_sheets", self.run_batch_rename_sheets),
-            ],
-        )
-
-    def _create_feature_group(self, parent, title, items):
-        group = tk.LabelFrame(
-            parent,
-            text=title,
-            font=("Microsoft YaHei", 11, "bold"),
-            fg=self.text_color,
-            bg=self.card_color,
-            bd=1,
-            relief="solid",
-            padx=10,
-            pady=8,
-            labelanchor="nw",
-        )
-        group.pack(fill=tk.X, pady=(0, 8))
-
-        for index, (text, attr_name, command) in enumerate(items):
-            button = tk.Button(
-                group,
-                text=text,
+        for row_index, (group_name, _) in enumerate(self._feature_groups(), start=1):
+            button = AppButton(
+                nav_panel,
+                text=group_name,
                 font=("Microsoft YaHei", 10),
-                command=command,
-                width=30,
-                height=1,
-                bg="#f8fafc",
-                fg=self.text_color,
-                activebackground="#e9eef5",
-                activeforeground=self.text_color,
-                relief="groove",
-                bd=1,
+                command=lambda name=group_name: self._show_feature_group(name),
+                width=150,
+                height=36,
                 anchor="w",
-                padx=8,
-                pady=4,
+                fg_color="transparent",
+                hover_color="#dbeafe",
+                text_color=self.text_color,
+                corner_radius=6,
             )
-            button.pack(fill=tk.X, pady=(0 if index == 0 else 6, 0))
-            setattr(self, attr_name, button)
+            button.grid(row=row_index, column=0, sticky="ew", padx=10, pady=(0, 6))
+            self.nav_buttons[group_name] = button
+
+        self.feature_content = ctk.CTkFrame(feature_area, fg_color=self.card_color, corner_radius=8)
+        self.feature_content.grid(row=0, column=1, sticky="nsew")
+        self.feature_content.grid_columnconfigure(0, weight=1)
+        self.feature_content.grid_columnconfigure(1, weight=1)
+
+        self._show_feature_group(self._feature_groups()[0][0])
+
+    def _show_feature_group(self, group_name):
+        for child in self.feature_content.winfo_children():
+            child.destroy()
+
+        self.current_group = group_name
+        for name, button in self.nav_buttons.items():
+            button.configure(
+                fg_color=self.accent_color if name == group_name else "transparent",
+                text_color="#ffffff" if name == group_name else self.text_color,
+            )
+
+        ctk.CTkLabel(
+            self.feature_content,
+            text=group_name,
+            font=("Microsoft YaHei", 16, "bold"),
+            text_color=self.text_color,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=(16, 10))
+
+        features = dict(self._feature_groups())[group_name]
+        for index, (title, description, attr_name, command) in enumerate(features):
+            row = index // 2 + 1
+            column = index % 2
+            card = self._create_feature_card(self.feature_content, title, description, attr_name, command)
+            card.grid(row=row, column=column, sticky="nsew", padx=(18, 9) if column == 0 else (9, 18), pady=(0, 12))
+
+    def _create_feature_card(self, parent, title, description, attr_name, command):
+        card = ctk.CTkFrame(
+            parent,
+            fg_color="#fbfdff",
+            border_width=1,
+            border_color=self.border_color,
+            corner_radius=8,
+        )
+        card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=("Microsoft YaHei", 12, "bold"),
+            text_color=self.text_color,
+            anchor="w",
+        ).grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 2))
+        ctk.CTkLabel(
+            card,
+            text=description,
+            font=("Microsoft YaHei", 10),
+            text_color=self.muted_text_color,
+            anchor="w",
+            justify="left",
+            wraplength=330,
+        ).grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 10))
+        button = AppButton(
+            card,
+            text="打开",
+            font=("Microsoft YaHei", 10),
+            command=command,
+            width=72,
+            height=30,
+            fg_color=self.accent_color,
+            hover_color="#1d4ed8",
+            text_color="#ffffff",
+            corner_radius=6,
+        )
+        button.grid(row=2, column=0, sticky="w", padx=14, pady=(0, 12))
+        setattr(self, attr_name, button)
+        self.feature_buttons[attr_name] = button
+        self._bind_card_action(card, command)
+        return card
+
+    def _bind_card_action(self, widget, command):
+        widget.bind("<Button-1>", lambda event: command())
+        for child in widget.winfo_children():
+            if isinstance(child, AppButton):
+                continue
+            child.bind("<Button-1>", lambda event: command())
+            if child.winfo_children():
+                self._bind_card_action(child, command)
+
+    def _run_gui_smoke_and_exit(self):
+        try:
+            self._log_info("GUI 冒烟：开始检查关键入口。")
+            for group_name in self.nav_buttons:
+                self._show_feature_group(group_name)
+                self._flush_ui()
+
+            for dialog_callback in (self.show_about, self.run_data_drill, self.run_template_generate, self.run_clear_by_color):
+                dialog_callback()
+                self._flush_ui()
+
+            guide_path = self._find_user_guide_path()
+            if guide_path:
+                self._log_info(f"GUI 冒烟：使用说明路径存在：{guide_path}")
+            else:
+                self._log_info("GUI 冒烟：未找到使用说明，将使用内置说明。")
+            self._log_info("GUI 冒烟：完成。")
+        finally:
+            self.root.after(200, self.root.destroy)
 
     def _create_log_area(self, parent):
-        self.frame_bottom = tk.Frame(parent, bg=self.bg_color)
-        self.frame_bottom.pack(fill=tk.BOTH, expand=True, pady=(2, 0))
+        self.frame_bottom = ctk.CTkFrame(parent, fg_color=self.card_color, corner_radius=8)
+        self.frame_bottom.grid(row=2, column=0, sticky="nsew")
+        self.frame_bottom.grid_columnconfigure(0, weight=1)
+        self.frame_bottom.grid_rowconfigure(1, weight=1)
 
-        tk.Label(
+        ctk.CTkLabel(
             self.frame_bottom,
             text="运行日志",
             font=("Microsoft YaHei", 11, "bold"),
-            fg=self.text_color,
-            bg=self.bg_color,
-        ).pack(anchor="w", pady=(0, 4))
+            text_color=self.text_color,
+        ).grid(row=0, column=0, sticky="w", padx=14, pady=(12, 4))
 
-        log_frame = tk.Frame(
+        self.log_text = ctk.CTkTextbox(
             self.frame_bottom,
-            bg=self.card_color,
-            highlightbackground=self.border_color,
-            highlightthickness=1,
-            height=140,
-        )
-        log_frame.pack(fill=tk.BOTH, expand=True)
-        log_frame.pack_propagate(False)
-
-        self.log_text = scrolledtext.ScrolledText(
-            log_frame,
             state="disabled",
             height=8,
             font=("Consolas", 10),
-            bg="#ffffff",
-            fg="#111827",
-            insertbackground="#111827",
-            relief="flat",
-            bd=0,
-            padx=8,
-            pady=8,
+            fg_color="#ffffff",
+            text_color="#111827",
+            border_width=1,
+            border_color=self.border_color,
+            corner_radius=6,
+            wrap="word",
         )
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        self.log_text.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
 
     def _get_project_root(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -404,31 +565,47 @@ class ExcelToolkitApp:
             except tk.TclError:
                 pass
 
+    def _schedule_smoke_dialog_close(self, dialog, close_callback=None, delay_ms=250):
+        if os.environ.get("EXCEL_TOOLKIT_GUI_SMOKE") != "1":
+            return
+
+        def close():
+            if dialog.winfo_exists():
+                try:
+                    if close_callback is None:
+                        dialog.destroy()
+                    else:
+                        close_callback()
+                except tk.TclError:
+                    pass
+
+        dialog.after(delay_ms, close)
+
     def _ask_text_no_grab(self, title, prompt, default="", entry_width=30, dialog_width=380, wraplength=340):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
+        dialog = ctk.CTkToplevel(self.root)
         dialog.withdraw()
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.transient(self.root)
+        dialog.configure(fg_color=self.card_color)
 
-        tk.Label(
+        ctk.CTkLabel(
             dialog,
             text=prompt,
             font=("Microsoft YaHei", 11),
             wraplength=wraplength,
             justify="left",
-            padx=16,
-            pady=8,
-        ).pack(anchor="w")
+            text_color=self.text_color,
+        ).pack(anchor="w", padx=16, pady=(14, 8))
 
-        entry = tk.Entry(dialog, font=("Microsoft YaHei", 11), width=entry_width)
+        entry = ctk.CTkEntry(dialog, font=("Microsoft YaHei", 11), width=entry_width * 10)
         entry.pack(padx=16, pady=(0, 12), fill=tk.X)
         entry.insert(0, default)
         entry.select_range(0, tk.END)
 
-        button_frame = tk.Frame(dialog)
+        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
 
         def confirm():
@@ -441,10 +618,34 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(button_frame, text="取消", command=cancel, font=("Microsoft YaHei", 10), width=10).pack(
+        AppButton(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+            width=76,
+            height=30,
+            fg_color="#f8fafc",
+            hover_color="#e9eef5",
+            text_color=self.text_color,
+            border_width=1,
+            border_color=self.border_color,
+            corner_radius=6,
+        ).pack(
             side=tk.RIGHT,
         )
-        tk.Button(button_frame, text="确定", command=confirm, font=("Microsoft YaHei", 10), width=10).pack(
+        AppButton(
+            button_frame,
+            text="确定",
+            command=confirm,
+            font=("Microsoft YaHei", 10),
+            width=76,
+            height=30,
+            fg_color=self.accent_color,
+            hover_color="#1d4ed8",
+            text_color="#ffffff",
+            corner_radius=6,
+        ).pack(
             side=tk.RIGHT,
             padx=(0, 8),
         )
@@ -453,29 +654,30 @@ class ExcelToolkitApp:
         dialog.bind("<Return>", lambda event: confirm())
         dialog.bind("<Escape>", lambda event: cancel())
         self._show_dialog_no_grab(dialog, focus_widget=entry, min_width=dialog_width)
+        self._schedule_smoke_dialog_close(dialog, cancel)
         self.root.wait_variable(done)
         return result["value"]
 
     def _ask_choice_no_grab(self, title, prompt, choices, dialog_width=420, wraplength=360):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
+        dialog = ctk.CTkToplevel(self.root)
         dialog.withdraw()
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.transient(self.root)
+        dialog.configure(fg_color=self.card_color)
 
-        tk.Label(
+        ctk.CTkLabel(
             dialog,
             text=prompt,
             font=("Microsoft YaHei", 11),
             wraplength=wraplength,
             justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+            text_color=self.text_color,
+        ).pack(anchor="w", padx=16, pady=(14, 12))
 
-        button_frame = tk.Frame(dialog)
+        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
 
         def choose(value):
@@ -483,69 +685,89 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(
+        AppButton(
             button_frame,
             text="取消",
             command=lambda: choose(None),
             font=("Microsoft YaHei", 10),
-            width=10,
+            width=76,
+            height=30,
+            fg_color="#f8fafc",
+            hover_color="#e9eef5",
+            text_color=self.text_color,
+            border_width=1,
+            border_color=self.border_color,
+            corner_radius=6,
         ).pack(side=tk.RIGHT)
 
         for label, value in reversed(choices):
-            tk.Button(
+            AppButton(
                 button_frame,
                 text=label,
                 command=lambda selected=value: choose(selected),
                 font=("Microsoft YaHei", 10),
-                width=14,
+                width=128,
+                height=30,
+                fg_color=self.accent_color,
+                hover_color="#1d4ed8",
+                text_color="#ffffff",
+                corner_radius=6,
             ).pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", lambda: choose(None))
         dialog.bind("<Escape>", lambda event: choose(None))
         self._show_dialog_no_grab(dialog, min_width=dialog_width)
+        self._schedule_smoke_dialog_close(dialog, lambda: choose(None))
         self.root.wait_variable(done)
         return result["value"]
 
     def _show_info_no_grab(self, title, message, dialog_width=400, wraplength=360):
-        dialog = tk.Toplevel(self.root)
+        dialog = ctk.CTkToplevel(self.root)
         dialog.withdraw()
         dialog.title(title)
         dialog.resizable(False, False)
         dialog.transient(self.root)
+        dialog.configure(fg_color=self.card_color)
 
-        tk.Label(
+        ctk.CTkLabel(
             dialog,
             text=message,
             font=("Microsoft YaHei", 11),
             wraplength=wraplength,
             justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+            text_color=self.text_color,
+        ).pack(anchor="w", padx=16, pady=(14, 12))
 
-        button_frame = tk.Frame(dialog)
+        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
-        tk.Button(
+        AppButton(
             button_frame,
             text="确定",
             command=dialog.destroy,
             font=("Microsoft YaHei", 10),
-            width=10,
+            width=76,
+            height=30,
+            fg_color=self.accent_color,
+            hover_color="#1d4ed8",
+            text_color="#ffffff",
+            corner_radius=6,
         ).pack(side=tk.RIGHT)
 
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
         self._show_dialog_no_grab(dialog, min_width=dialog_width)
+        self._schedule_smoke_dialog_close(dialog)
 
     def _ask_clear_multi_backup_option_no_grab(self):
         result = {"value": None}
         done = tk.BooleanVar(master=self.root, value=False)
-        dialog = tk.Toplevel(self.root)
+        dialog = ctk.CTkToplevel(self.root)
         dialog.withdraw()
         dialog.title("按颜色清空内容")
         dialog.resizable(False, False)
         dialog.transient(self.root)
+        dialog.configure(fg_color=self.card_color)
 
-        tk.Label(
+        ctk.CTkLabel(
             dialog,
             text=(
                 "多个工作簿模式默认会先扫描，再把实际会被修改的文件集中备份到一个批次备份文件夹。\n"
@@ -554,22 +776,21 @@ class ExcelToolkitApp:
             font=("Microsoft YaHei", 11),
             wraplength=480,
             justify="left",
-            padx=16,
-            pady=12,
-        ).pack(anchor="w")
+            text_color=self.text_color,
+        ).pack(anchor="w", padx=16, pady=(14, 12))
 
         skip_backup_var = tk.BooleanVar(master=self.root, value=False)
-        tk.Checkbutton(
+        ctk.CTkCheckBox(
             dialog,
             text="已自行备份，本次不再生成备份文件",
             variable=skip_backup_var,
             font=("Microsoft YaHei", 10),
-            bg=self.card_color,
-            anchor="w",
-            padx=16,
+            text_color=self.text_color,
+            fg_color=self.accent_color,
+            hover_color="#1d4ed8",
         ).pack(anchor="w", fill=tk.X, padx=16, pady=(0, 12))
 
-        button_frame = tk.Frame(dialog)
+        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         button_frame.pack(padx=16, pady=(0, 14), fill=tk.X)
 
         def confirm():
@@ -582,8 +803,32 @@ class ExcelToolkitApp:
             done.set(True)
             dialog.destroy()
 
-        tk.Button(button_frame, text="取消", command=cancel, font=("Microsoft YaHei", 10), width=10).pack(side=tk.RIGHT)
-        tk.Button(button_frame, text="开始执行", command=confirm, font=("Microsoft YaHei", 10), width=10).pack(
+        AppButton(
+            button_frame,
+            text="取消",
+            command=cancel,
+            font=("Microsoft YaHei", 10),
+            width=76,
+            height=30,
+            fg_color="#f8fafc",
+            hover_color="#e9eef5",
+            text_color=self.text_color,
+            border_width=1,
+            border_color=self.border_color,
+            corner_radius=6,
+        ).pack(side=tk.RIGHT)
+        AppButton(
+            button_frame,
+            text="开始执行",
+            command=confirm,
+            font=("Microsoft YaHei", 10),
+            width=92,
+            height=30,
+            fg_color=self.accent_color,
+            hover_color="#1d4ed8",
+            text_color="#ffffff",
+            corner_radius=6,
+        ).pack(
             side=tk.RIGHT,
             padx=(0, 8),
         )
@@ -591,6 +836,7 @@ class ExcelToolkitApp:
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
         self._show_dialog_no_grab(dialog, min_width=540)
+        self._schedule_smoke_dialog_close(dialog, cancel)
         self.root.wait_variable(done)
         return result["value"]
 
@@ -2874,7 +3120,7 @@ class _FlushingLogger:
         return getattr(self._logger, name)
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     app = ExcelToolkitApp(root)
     root.mainloop()
 
