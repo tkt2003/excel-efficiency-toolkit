@@ -292,20 +292,20 @@ class ExcelToolkitApp:
                 font=("Microsoft YaHei", 9),
                 command=command,
                 width=76,
-                height=26,
+                height=28,
                 fg_color="#f8fafc",
                 hover_color="#eef4fb",
                 text_color=self.text_color,
                 border_width=1,
                 border_color="#dfe7f1",
                 corner_radius=6,
-            ).grid(row=0, column=index, padx=(6, 0))
+            ).grid(row=0, column=index, padx=(8 if index else 0, 0))
 
         ctk.CTkLabel(
             title_block,
             text="审计、财务、报表整理常用 Excel 工具台",
-            font=("Microsoft YaHei", 10),
-            text_color=self.muted_text_color,
+            font=("Microsoft YaHei", 11),
+            text_color="#475569",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
     def _create_feature_area(self, parent):
@@ -386,8 +386,8 @@ class ExcelToolkitApp:
         desc_label = ctk.CTkLabel(
             card,
             text=description,
-            font=("Microsoft YaHei", 9),
-            text_color=self.muted_text_color,
+            font=("Microsoft YaHei", 10),
+            text_color="#526274",
             anchor="w",
             justify="left",
         )
@@ -400,7 +400,7 @@ class ExcelToolkitApp:
                 border_color="#e5eaf0" if is_disabled else self.border_color,
             )
             title_label.configure(text_color=self.subtle_text_color if is_disabled else self.text_color)
-            desc_label.configure(text_color=self.subtle_text_color if is_disabled else self.muted_text_color)
+            desc_label.configure(text_color=self.subtle_text_color if is_disabled else "#526274")
             arrow_label.configure(text_color=self.subtle_text_color if is_disabled else self.muted_text_color)
             if is_disabled:
                 card._feature_enabled = False
@@ -479,7 +479,7 @@ class ExcelToolkitApp:
             self.frame_bottom,
             state="disabled",
             height=48,
-            font=("Consolas", 10),
+            font=("Consolas", 11),
             fg_color="#f8fafc",
             text_color="#111827",
             border_width=1,
@@ -487,7 +487,7 @@ class ExcelToolkitApp:
             corner_radius=8,
             wrap="word",
         )
-        self.log_text.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 10))
+        self.log_text.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 8))
 
     def _get_project_root(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
