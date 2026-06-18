@@ -540,7 +540,6 @@ class ExcelToolkitApp:
                 "详细说明请查看同目录下的 使用说明.txt。"
             ),
             dialog_width=460,
-            dialog_height=280,
             wraplength=420,
         )
 
@@ -554,7 +553,6 @@ class ExcelToolkitApp:
                 "当前阶段：常用功能阶段性完成"
             ),
             dialog_width=560,
-            dialog_height=320,
             wraplength=500,
         )
 
@@ -618,14 +616,14 @@ class ExcelToolkitApp:
             border_width=1,
             border_color="#e5edf5",
         )
-        card.pack(fill=tk.BOTH, expand=True, padx=14, pady=14)
+        card.pack(fill=tk.X, expand=False, padx=18, pady=18)
 
         ctk.CTkLabel(
             card,
             text=title,
             font=("Microsoft YaHei", 15, "bold"),
             text_color=self.text_color,
-        ).pack(anchor="w", padx=16, pady=(14, 6))
+        ).pack(anchor="w", padx=16, pady=(14, 8))
 
         return dialog, card
 
@@ -638,12 +636,12 @@ class ExcelToolkitApp:
             justify="left",
             text_color=self.text_color,
         )
-        label.pack(anchor="w", padx=16, pady=pady)
+        label.pack(anchor="w", fill=tk.X, padx=16, pady=pady)
         return label
 
     def _create_dialog_button_bar(self, parent):
         button_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        button_frame.pack(padx=16, pady=(2, 14), fill=tk.X)
+        button_frame.pack(padx=16, pady=(8, 14), fill=tk.X)
         return button_frame
 
     def _add_dialog_button(self, parent, text, command, primary=False, width=None):
@@ -721,7 +719,7 @@ class ExcelToolkitApp:
         default="",
         entry_width=30,
         dialog_width=520,
-        dialog_height=300,
+        dialog_height=None,
         wraplength=460,
     ):
         result = {"value": None}
@@ -772,7 +770,7 @@ class ExcelToolkitApp:
         prompt,
         choices,
         dialog_width=760,
-        dialog_height=420,
+        dialog_height=None,
         wraplength=680,
     ):
         result = {"value": None}
@@ -806,7 +804,7 @@ class ExcelToolkitApp:
         self.root.wait_variable(done)
         return result["value"]
 
-    def _show_info_no_grab(self, title, message, dialog_width=520, dialog_height=300, wraplength=460):
+    def _show_info_no_grab(self, title, message, dialog_width=520, dialog_height=None, wraplength=460):
         dialog, card = self._create_dialog_card(title)
 
         self._add_dialog_message(card, message, wraplength=wraplength, pady=(0, 12))
@@ -862,7 +860,7 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
-        self._show_dialog_no_grab(dialog, width=720, height=340)
+        self._show_dialog_no_grab(dialog, width=640)
         self._schedule_smoke_dialog_close(dialog, cancel)
         self.root.wait_variable(done)
         return result["value"]
@@ -990,7 +988,6 @@ class ExcelToolkitApp:
             "请输入源 sheet 名；留空则导入每个源文件的第一个可见 sheet。",
             entry_width=28,
             dialog_width=440,
-            dialog_height=280,
             wraplength=380,
         )
         if requested_sheet_name is None:
@@ -1005,7 +1002,6 @@ class ExcelToolkitApp:
                 ("是，只复制值", True),
             ],
             dialog_width=500,
-            dialog_height=300,
             wraplength=440,
         )
         if values_only is None:
@@ -1025,7 +1021,6 @@ class ExcelToolkitApp:
                 ("我已关闭目标，继续", True),
             ],
             dialog_width=500,
-            dialog_height=320,
             wraplength=440,
         )
         if confirmed is not True:
@@ -1059,7 +1054,6 @@ class ExcelToolkitApp:
                 f"目标工作簿路径：{result['target_path']}\n\n"
                 "已生成多簿汇总目录和多簿汇总日志。",
                 dialog_width=620,
-                dialog_height=360,
                 wraplength=560,
             )
         except Exception as e:
@@ -1068,7 +1062,6 @@ class ExcelToolkitApp:
                 "多簿到一簿",
                 f"多簿到一簿失败：{e}",
                 dialog_width=560,
-                dialog_height=300,
                 wraplength=500,
             )
         finally:
@@ -1371,8 +1364,7 @@ class ExcelToolkitApp:
                     ("仅汇总一个 sheet", "single"),
                     ("汇总所有匹配 sheet", "all"),
                 ],
-                dialog_width=760,
-                dialog_height=380,
+                dialog_width=700,
                 wraplength=680,
             )
             if sum_scope is None:
@@ -1386,7 +1378,6 @@ class ExcelToolkitApp:
                     "请输入要汇总的 sheet 名；留空则使用当前活动 sheet。",
                     entry_width=26,
                     dialog_width=520,
-                    dialog_height=280,
                     wraplength=460,
                 )
                 if target_sheet_name is None:
@@ -1411,8 +1402,7 @@ class ExcelToolkitApp:
                     ("写入求和公式", "formula"),
                     ("只写入汇总数值", "value"),
                 ],
-                dialog_width=760,
-                dialog_height=380,
+                dialog_width=700,
                 wraplength=680,
             )
             if write_mode is None:
@@ -1457,7 +1447,6 @@ class ExcelToolkitApp:
                     ("多个工作簿", "multi"),
                 ],
                 dialog_width=760,
-                dialog_height=420,
                 wraplength=680,
             )
             if mode is None:
@@ -1475,7 +1464,6 @@ class ExcelToolkitApp:
                 "按颜色清空内容",
                 f"按颜色清空内容失败：{e}",
                 dialog_width=620,
-                dialog_height=320,
                 wraplength=560,
             )
         finally:
@@ -1502,7 +1490,6 @@ class ExcelToolkitApp:
             f"批量区域：{result['range_group_count']} 组\n\n"
             "当前工作簿未自动保存，请检查后自行保存。",
             dialog_width=520,
-            dialog_height=320,
             wraplength=460,
         )
 
@@ -1546,7 +1533,6 @@ class ExcelToolkitApp:
             f"{backup_message}\n"
             f"处理日志：{result['log_path']}",
             dialog_width=720,
-            dialog_height=360,
             wraplength=650,
         )
 
@@ -1566,7 +1552,6 @@ class ExcelToolkitApp:
                     ("多文件数据穿透查询", "multi"),
                 ],
                 dialog_width=760,
-                dialog_height=420,
                 wraplength=680,
             )
             if mode is None:
@@ -1584,7 +1569,6 @@ class ExcelToolkitApp:
                 "数据穿透查询",
                 f"数据穿透查询失败：{e}",
                 dialog_width=620,
-                dialog_height=320,
                 wraplength=560,
             )
         finally:
@@ -1610,7 +1594,6 @@ class ExcelToolkitApp:
             default=DEFAULT_CHECKLIST_SHEET_NAME,
             entry_width=24,
             dialog_width=360,
-            dialog_height=260,
         )
         if sheet_name is None:
             self._log_info("用户已取消操作。")
@@ -1634,7 +1617,6 @@ class ExcelToolkitApp:
             "原模板工作簿不会被修改。",
             [("开始生成", "run")],
             dialog_width=680,
-            dialog_height=420,
             wraplength=620,
         )
         if choice != "run":
@@ -1670,7 +1652,6 @@ class ExcelToolkitApp:
                 f"输出目录：{result['output_dir']}\n\n"
                 "原模板工作簿未被修改。",
                 dialog_width=560,
-                dialog_height=320,
                 wraplength=500,
             )
         except Exception as e:
@@ -1679,7 +1660,6 @@ class ExcelToolkitApp:
                 "按清单生成报表",
                 f"按清单生成报表失败：{e}",
                 dialog_width=560,
-                dialog_height=300,
                 wraplength=500,
             )
         finally:
@@ -1700,7 +1680,6 @@ class ExcelToolkitApp:
                 ("替换多个链接生成", "multi"),
             ],
             dialog_width=760,
-            dialog_height=420,
             wraplength=680,
         )
         if mode is None:
@@ -1739,7 +1718,6 @@ class ExcelToolkitApp:
                     "按模板批量生成 Excel",
                     f"扫描模板外部链接失败：{e}",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
                 return
@@ -1750,7 +1728,6 @@ class ExcelToolkitApp:
                     "按模板批量生成 Excel",
                     "模板没有外部链接，无法执行换链接生成报表。\n请确认模板含有引用其他工作簿的公式后重试。",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
                 return
@@ -1796,7 +1773,6 @@ class ExcelToolkitApp:
                 default=DEFAULT_OUTPUT_NAME_SUFFIX,
                 entry_width=24,
                 dialog_width=560,
-                dialog_height=300,
                 wraplength=500,
             )
             if suffix_input is None:
@@ -1816,7 +1792,6 @@ class ExcelToolkitApp:
                 "其他外部链接保持不变；原模板不会被修改。",
                 [("开始生成", "run")],
                 dialog_width=820,
-                dialog_height=420,
                 wraplength=740,
             )
             if confirmed != "run":
@@ -1857,7 +1832,6 @@ class ExcelToolkitApp:
                 f"日志文件：{result['log_path']}\n\n"
                 "原模板工作簿未被修改。",
                 dialog_width=720,
-                dialog_height=360,
                 wraplength=650,
             )
         except Exception as e:
@@ -1866,7 +1840,6 @@ class ExcelToolkitApp:
                 "按模板批量生成 Excel",
                 f"按模板批量生成 Excel失败：{e}",
                 dialog_width=620,
-                dialog_height=320,
                 wraplength=560,
             )
         finally:
@@ -1933,7 +1906,7 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
-        self._show_dialog_no_grab(dialog, width=760, height=420)
+        self._show_dialog_no_grab(dialog, width=760)
         self.root.wait_variable(done)
         return result["value"]
 
@@ -1962,7 +1935,6 @@ class ExcelToolkitApp:
                     "按模板多链接生成 Excel",
                     f"扫描模板外部链接失败：{e}",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
                 return
@@ -1973,7 +1945,6 @@ class ExcelToolkitApp:
                     "按模板多链接生成 Excel",
                     "模板没有外部链接，无法生成多链接规则表。\n请确认模板含有引用其他工作簿的公式后重试。",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
                 return
@@ -2018,7 +1989,6 @@ class ExcelToolkitApp:
                 default=DEFAULT_OUTPUT_NAME_SUFFIX,
                 entry_width=24,
                 dialog_width=560,
-                dialog_height=300,
                 wraplength=500,
             )
             if suffix_input is None:
@@ -2059,7 +2029,6 @@ class ExcelToolkitApp:
                 "按模板多链接生成 Excel",
                 f"按模板多链接生成 Excel失败：{e}",
                 dialog_width=620,
-                dialog_height=320,
                 wraplength=560,
             )
         finally:
@@ -2117,7 +2086,6 @@ class ExcelToolkitApp:
                     "按模板多链接生成 Excel",
                     result_message,
                     dialog_width=720,
-                    dialog_height=360,
                     wraplength=650,
                 )
                 result["execute"] = True
@@ -2129,7 +2097,6 @@ class ExcelToolkitApp:
                     "按模板多链接生成 Excel",
                     f"按模板多链接生成 Excel失败：{e}",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
             finally:
@@ -2151,7 +2118,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=340)
+        self._show_dialog_no_grab(dialog, width=720)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2162,7 +2129,6 @@ class ExcelToolkitApp:
             "规则表仍被 Excel 占用，无法读取或回写。\n"
             "请先保存并关闭规则表，再点击执行。",
             dialog_width=620,
-            dialog_height=320,
             wraplength=560,
         )
 
@@ -2191,7 +2157,6 @@ class ExcelToolkitApp:
                 f"跳过数量：{result['skipped_count']}\n\n"
                 "当前工作簿未自动保存，请检查后自行保存。",
                 dialog_width=520,
-                dialog_height=320,
                 wraplength=460,
             )
         except Exception as e:
@@ -2200,7 +2165,6 @@ class ExcelToolkitApp:
                 "选区 ROUND 保留两位",
                 f"选区 ROUND 保留两位失败：{e}",
                 dialog_width=520,
-                dialog_height=300,
                 wraplength=460,
             )
         finally:
@@ -2219,7 +2183,6 @@ class ExcelToolkitApp:
             "当前工作簿不会被修改或保存。",
             [("继续选择源文件", "continue")],
             dialog_width=760,
-            dialog_height=420,
             wraplength=680,
         )
         return choice == "continue"
@@ -2488,7 +2451,6 @@ class ExcelToolkitApp:
             f"结果工作表：{result_sheet_name}\n\n"
             "当前活动工作簿未自动保存。",
             dialog_width=620,
-            dialog_height=360,
             wraplength=560,
         )
 
@@ -2529,7 +2491,6 @@ class ExcelToolkitApp:
             f"忽略非数字：{result['ignored_non_numeric_count']}\n\n"
             "目标工作簿未自动保存，请检查后自行保存。",
             dialog_width=720,
-            dialog_height=360,
             wraplength=650,
         )
 
@@ -2558,7 +2519,6 @@ class ExcelToolkitApp:
             f"忽略非数字：{result['ignored_non_numeric_count']}\n\n"
             "目标工作簿未自动保存，请检查后自行保存。",
             dialog_width=720,
-            dialog_height=360,
             wraplength=650,
         )
 
@@ -2618,7 +2578,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=340)
+        self._show_dialog_no_grab(dialog, width=720)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2636,7 +2596,6 @@ class ExcelToolkitApp:
                 ("删除模式", "delete"),
             ],
             dialog_width=760,
-            dialog_height=380,
             wraplength=680,
         )
         if mode is None:
@@ -2685,7 +2644,6 @@ class ExcelToolkitApp:
                 "批量更换多文件链接",
                 f"批量更换多文件链接失败：{e}",
                 dialog_width=620,
-                dialog_height=320,
                 wraplength=560,
             )
         finally:
@@ -2742,7 +2700,6 @@ class ExcelToolkitApp:
                     "批量更换多文件链接",
                     result_message,
                     dialog_width=720,
-                    dialog_height=360,
                     wraplength=650,
                 )
                 result["execute"] = True
@@ -2754,7 +2711,6 @@ class ExcelToolkitApp:
                     "批量更换多文件链接",
                     f"批量更换多文件链接失败：{e}",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
             finally:
@@ -2776,7 +2732,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=340)
+        self._show_dialog_no_grab(dialog, width=720)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2787,7 +2743,6 @@ class ExcelToolkitApp:
             "规则表仍被 Excel 占用，无法读取或回写。\n"
             "请先保存并关闭规则表，再点击执行批量更换多文件链接。",
             dialog_width=620,
-            dialog_height=320,
             wraplength=560,
         )
 
@@ -2862,7 +2817,6 @@ class ExcelToolkitApp:
                     "批量重命名工作表",
                     result_message,
                     dialog_width=720,
-                    dialog_height=360,
                     wraplength=650,
                 )
                 result["execute"] = True
@@ -2874,7 +2828,6 @@ class ExcelToolkitApp:
                     "批量重命名工作表",
                     f"批量重命名工作表失败：{e}",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
             finally:
@@ -2896,7 +2849,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=340)
+        self._show_dialog_no_grab(dialog, width=720)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2996,7 +2949,6 @@ class ExcelToolkitApp:
             "规则表仍被 Excel 占用，无法读取或回写。\n"
             "请先保存并关闭规则表，再点击执行批量重命名工作表。",
             dialog_width=620,
-            dialog_height=320,
             wraplength=560,
         )
 
@@ -3084,7 +3036,6 @@ class ExcelToolkitApp:
                     "批量重命名文件",
                     result_message,
                     dialog_width=720,
-                    dialog_height=360,
                     wraplength=650,
                 )
                 result["execute"] = True
@@ -3096,7 +3047,6 @@ class ExcelToolkitApp:
                     "批量重命名文件",
                     f"批量重命名文件失败：{e}",
                     dialog_width=620,
-                    dialog_height=320,
                     wraplength=560,
                 )
             finally:
@@ -3118,7 +3068,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720, height=340)
+        self._show_dialog_no_grab(dialog, width=720)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -3129,7 +3079,6 @@ class ExcelToolkitApp:
             "规则表仍被 Excel 占用，无法回写。\n"
             "请先保存并关闭规则表，再点击执行批量重命名。",
             dialog_width=620,
-            dialog_height=320,
             wraplength=560,
         )
 
