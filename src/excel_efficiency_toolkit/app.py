@@ -552,7 +552,7 @@ class ExcelToolkitApp:
                 "说明：面向审计、财务、报表整理场景的 Excel 效率工具\n"
                 "当前阶段：常用功能阶段性完成"
             ),
-            dialog_width=560,
+            dialog_width=520,
             wraplength=500,
         )
 
@@ -608,6 +608,7 @@ class ExcelToolkitApp:
         dialog.resizable(resizable, resizable)
         dialog.transient(self.root)
         dialog.configure(fg_color=self.bg_color)
+        dialog.minsize(1, 1)
 
         card = ctk.CTkFrame(
             dialog,
@@ -616,7 +617,7 @@ class ExcelToolkitApp:
             border_width=1,
             border_color="#e5edf5",
         )
-        card.pack(fill=tk.X, expand=False, padx=18, pady=18)
+        card.pack(fill=tk.X, expand=False, padx=16, pady=16)
 
         ctk.CTkLabel(
             card,
@@ -670,14 +671,14 @@ class ExcelToolkitApp:
         width=None,
         height=None,
     ):
-        dialog.update_idletasks()
         final_width = width or max(dialog.winfo_reqwidth(), min_width)
-        if height is not None:
-            final_height = height
-        elif min_height:
-            final_height = max(dialog.winfo_reqheight(), min_height)
-        else:
-            final_height = None
+        try:
+            dialog.geometry(f"{final_width}x1")
+        except tk.TclError:
+            pass
+        dialog.update_idletasks()
+        requested_height = dialog.winfo_reqheight()
+        final_height = height or max(requested_height, min_height or 1)
         self._center_window(dialog, width=final_width, height=final_height)
         dialog.deiconify()
         dialog.lift()
@@ -860,7 +861,7 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
-        self._show_dialog_no_grab(dialog, width=640)
+        self._show_dialog_no_grab(dialog, width=680)
         self._schedule_smoke_dialog_close(dialog, cancel)
         self.root.wait_variable(done)
         return result["value"]
@@ -1364,8 +1365,8 @@ class ExcelToolkitApp:
                     ("仅汇总一个 sheet", "single"),
                     ("汇总所有匹配 sheet", "all"),
                 ],
-                dialog_width=700,
-                wraplength=680,
+                dialog_width=680,
+                wraplength=620,
             )
             if sum_scope is None:
                 self._log_info("用户已取消操作。")
@@ -1402,8 +1403,8 @@ class ExcelToolkitApp:
                     ("写入求和公式", "formula"),
                     ("只写入汇总数值", "value"),
                 ],
-                dialog_width=700,
-                wraplength=680,
+                dialog_width=680,
+                wraplength=620,
             )
             if write_mode is None:
                 self._log_info("用户已取消操作。")
@@ -1446,8 +1447,8 @@ class ExcelToolkitApp:
                     ("当前活动工作簿", "active"),
                     ("多个工作簿", "multi"),
                 ],
-                dialog_width=760,
-                wraplength=680,
+                dialog_width=720,
+                wraplength=660,
             )
             if mode is None:
                 self._log_info("用户已取消操作。")
@@ -1551,8 +1552,8 @@ class ExcelToolkitApp:
                     ("单文件数据穿透查询", "single"),
                     ("多文件数据穿透查询", "multi"),
                 ],
-                dialog_width=760,
-                wraplength=680,
+                dialog_width=720,
+                wraplength=660,
             )
             if mode is None:
                 self._log_info("用户已取消操作。")
@@ -1679,8 +1680,8 @@ class ExcelToolkitApp:
                 ("替换一个链接生成", "single"),
                 ("替换多个链接生成", "multi"),
             ],
-            dialog_width=760,
-            wraplength=680,
+            dialog_width=740,
+            wraplength=660,
         )
         if mode is None:
             self._log_info("用户已取消操作。")
