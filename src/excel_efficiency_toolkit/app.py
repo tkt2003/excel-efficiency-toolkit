@@ -181,13 +181,13 @@ class ExcelToolkitApp:
                 "合并整理",
                 [
                     (
-                        "多表合并到一表",
+                        "合并多个工作表",
                         "",
                         "btn_merge_sheets",
                         self.run_merge_sheets,
                     ),
                     (
-                        "多文件合并到一个文件",
+                        "合并多个 Excel 文件",
                         "",
                         "btn_merge_workbooks",
                         self.run_merge_workbooks,
@@ -198,32 +198,32 @@ class ExcelToolkitApp:
                 "模板生成 / 取数",
                 [
                     (
-                        "按颜色汇总求和",
-                        "按填充色位置从多个文件汇总取数",
+                        "按颜色汇总金额",
+                        "按填充色汇总多个文件中的金额",
                         "btn_color_sum",
                         self.run_color_sum,
                     ),
                     (
-                        "按颜色清空内容",
-                        "按填充色清空值和公式，保留格式",
+                        "按颜色清空单元格",
+                        "清空指定填充色单元格内容，保留格式",
                         "btn_clear_by_color",
                         self.run_clear_by_color,
                     ),
                     (
-                        "数据穿透查询",
-                        "查询同一单元格或区域在多个表/文件中的数据",
+                        "数据穿透取数",
+                        "按单元格区域查询多个表或文件中的数据",
                         "btn_data_drill",
                         self.run_data_drill,
                     ),
                     (
-                        "按模板批量生成 Excel",
-                        "基于模板批量替换链接并生成文件",
+                        "按模板批量生成报表",
+                        "替换链接并生成多个 Excel 文件",
                         "btn_template_tb_report",
                         self.run_template_generate,
                     ),
                     (
-                        "选区 ROUND 保留两位",
-                        "对当前选区公式套用 ROUND 两位",
+                        "选区数值四舍五入",
+                        "套用 ROUND 公式保留两位小数",
                         "btn_round_formula",
                         self.run_round_formula,
                     ),
@@ -233,8 +233,8 @@ class ExcelToolkitApp:
                 "目录与检查",
                 [
                     (
-                        "生成带链接的工作表目录",
-                        "",
+                        "生成工作表目录",
+                        "生成可点击跳转的工作表目录",
                         "btn_sheet_index",
                         self.run_sheet_index,
                     ),
@@ -244,7 +244,7 @@ class ExcelToolkitApp:
                 "批量维护",
                 [
                     (
-                        "批量更换多文件链接",
+                        "批量更换 Excel 链接",
                         "批量替换多个 Excel 文件中的外部链接",
                         "btn_link_replace",
                         self.run_batch_link_replace,
@@ -320,8 +320,8 @@ class ExcelToolkitApp:
         feature_area.grid_columnconfigure(1, weight=1, uniform="feature_columns")
 
         groups = dict(self._feature_groups())
-        left_sections = ("拆分导出", "合并整理", "目录与检查")
-        right_sections = ("模板生成 / 取数", "批量维护")
+        left_sections = ("拆分导出", "合并整理", "批量维护")
+        right_sections = ("模板生成 / 取数", "目录与检查")
 
         for column, section_names in enumerate((left_sections, right_sections)):
             column_frame = ctk.CTkFrame(feature_area, fg_color="transparent")
@@ -475,7 +475,7 @@ class ExcelToolkitApp:
             corner_radius=12,
             border_width=1,
             border_color="#e5edf5",
-            height=96,
+            height=116,
         )
         self.frame_bottom.grid(row=2, column=0, sticky="nsew")
         self.frame_bottom.grid_propagate(False)
@@ -492,7 +492,7 @@ class ExcelToolkitApp:
         self.log_text = ctk.CTkTextbox(
             self.frame_bottom,
             state="disabled",
-            height=48,
+            height=66,
             font=("Consolas", 11),
             fg_color="#f8fafc",
             text_color="#111827",
