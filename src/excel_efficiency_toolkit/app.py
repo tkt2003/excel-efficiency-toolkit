@@ -144,7 +144,7 @@ class ExcelToolkitApp:
         self.root.configure(fg_color=self.bg_color)
 
         self.main_frame = ctk.CTkFrame(root, fg_color=self.bg_color, corner_radius=0)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(1, weight=1)
 
@@ -269,17 +269,17 @@ class ExcelToolkitApp:
             border_width=1,
             border_color="#e5edf5",
         )
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         header.grid_columnconfigure(0, weight=1)
 
         title_block = ctk.CTkFrame(header, fg_color="transparent")
-        title_block.grid(row=0, column=0, sticky="ew", padx=20, pady=14)
+        title_block.grid(row=0, column=0, sticky="ew", padx=18, pady=10)
         title_block.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
             title_block,
             text=APP_TITLE,
-            font=("Microsoft YaHei", 20, "bold"),
+            font=("Microsoft YaHei", 19, "bold"),
             text_color=self.text_color,
         ).grid(row=0, column=0, sticky="w")
 
@@ -292,7 +292,7 @@ class ExcelToolkitApp:
                 font=("Microsoft YaHei", 9),
                 command=command,
                 width=76,
-                height=28,
+                height=26,
                 fg_color="#f8fafc",
                 hover_color="#eef4fb",
                 text_color=self.text_color,
@@ -306,7 +306,7 @@ class ExcelToolkitApp:
             text="审计、财务、报表整理常用 Excel 工具台",
             font=("Microsoft YaHei", 10),
             text_color=self.muted_text_color,
-        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
     def _create_feature_area(self, parent):
         feature_area = ctk.CTkScrollableFrame(
@@ -315,13 +315,13 @@ class ExcelToolkitApp:
             scrollbar_button_color="#cbd5e1",
             scrollbar_button_hover_color="#94a3b8",
         )
-        feature_area.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
+        feature_area.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
         feature_area.grid_columnconfigure(0, weight=1, uniform="feature_columns")
         feature_area.grid_columnconfigure(1, weight=1, uniform="feature_columns")
 
         groups = dict(self._feature_groups())
-        left_sections = ("拆分导出", "合并整理", "模板生成 / 取数")
-        right_sections = ("目录与检查", "批量维护")
+        left_sections = ("拆分导出", "合并整理", "目录与检查")
+        right_sections = ("模板生成 / 取数", "批量维护")
 
         for column, section_names in enumerate((left_sections, right_sections)):
             column_frame = ctk.CTkFrame(feature_area, fg_color="transparent")
@@ -330,7 +330,7 @@ class ExcelToolkitApp:
 
             for row, section_name in enumerate(section_names):
                 panel = self._create_section_panel(column_frame, section_name, groups[section_name])
-                panel.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+                panel.grid(row=row, column=0, sticky="ew", pady=(0, 8))
 
     def _create_section_panel(self, parent, title, features):
         panel = ctk.CTkFrame(
@@ -345,20 +345,20 @@ class ExcelToolkitApp:
         ctk.CTkLabel(
             panel,
             text=title,
-            font=("Microsoft YaHei", 14, "bold"),
+            font=("Microsoft YaHei", 13, "bold"),
             text_color=self.text_color,
-        ).grid(row=0, column=0, sticky="w", padx=14, pady=(12, 8))
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(9, 6))
 
         for row, (feature_title, description, attr_name, command) in enumerate(features, start=1):
             card = self._create_feature_card(panel, feature_title, description, attr_name, command)
-            card.grid(row=row, column=0, sticky="ew", padx=12, pady=(0, 8))
+            card.grid(row=row, column=0, sticky="ew", padx=10, pady=(0, 6))
 
         return panel
 
     def _create_feature_card(self, parent, title, description, attr_name, command):
         card = ctk.CTkFrame(
             parent,
-            height=62,
+            height=54,
             fg_color="#fbfdff",
             border_width=1,
             border_color=self.border_color,
@@ -370,11 +370,11 @@ class ExcelToolkitApp:
         title_label = ctk.CTkLabel(
             card,
             text=title,
-            font=("Microsoft YaHei", 12, "bold"),
+            font=("Microsoft YaHei", 11, "bold"),
             text_color=self.text_color,
             anchor="w",
         )
-        title_label.grid(row=0, column=0, sticky="ew", padx=(14, 8), pady=(8, 0))
+        title_label.grid(row=0, column=0, sticky="ew", padx=(12, 8), pady=(6, 0))
         arrow_label = ctk.CTkLabel(
             card,
             text="›",
@@ -382,7 +382,7 @@ class ExcelToolkitApp:
             text_color=self.muted_text_color,
             width=18,
         )
-        arrow_label.grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 14))
+        arrow_label.grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 12))
         desc_label = ctk.CTkLabel(
             card,
             text=description,
@@ -391,7 +391,7 @@ class ExcelToolkitApp:
             anchor="w",
             justify="left",
         )
-        desc_label.grid(row=1, column=0, sticky="ew", padx=(14, 8), pady=(0, 7))
+        desc_label.grid(row=1, column=0, sticky="ew", padx=(12, 8), pady=(0, 5))
 
         def set_state(state):
             is_disabled = state == "disabled"
@@ -461,7 +461,7 @@ class ExcelToolkitApp:
             corner_radius=12,
             border_width=1,
             border_color="#e5edf5",
-            height=146,
+            height=96,
         )
         self.frame_bottom.grid(row=2, column=0, sticky="nsew")
         self.frame_bottom.grid_propagate(False)
@@ -473,12 +473,12 @@ class ExcelToolkitApp:
             text="运行日志",
             font=("Microsoft YaHei", 12, "bold"),
             text_color=self.text_color,
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 6))
+        ).grid(row=0, column=0, sticky="w", padx=14, pady=(8, 4))
 
         self.log_text = ctk.CTkTextbox(
             self.frame_bottom,
             state="disabled",
-            height=104,
+            height=48,
             font=("Consolas", 10),
             fg_color="#f8fafc",
             text_color="#111827",
@@ -487,7 +487,7 @@ class ExcelToolkitApp:
             corner_radius=8,
             wrap="word",
         )
-        self.log_text.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 14))
+        self.log_text.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 10))
 
     def _get_project_root(self):
         return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
