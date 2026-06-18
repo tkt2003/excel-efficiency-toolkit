@@ -617,7 +617,10 @@ class ExcelToolkitApp:
             border_width=1,
             border_color="#e5edf5",
         )
-        card.pack(fill=tk.X, expand=False, padx=16, pady=16)
+        outer_pad = 16
+        card.pack(fill=tk.X, expand=False, padx=outer_pad, pady=outer_pad)
+        dialog._dialog_card = card
+        dialog._dialog_outer_pad_y = outer_pad
 
         ctk.CTkLabel(
             card,
@@ -677,7 +680,12 @@ class ExcelToolkitApp:
         except tk.TclError:
             pass
         dialog.update_idletasks()
-        requested_height = dialog.winfo_reqheight()
+        card = getattr(dialog, "_dialog_card", None)
+        outer_pad_y = getattr(dialog, "_dialog_outer_pad_y", 0)
+        if card is not None and card.winfo_exists():
+            requested_height = card.winfo_reqheight() + outer_pad_y * 2
+        else:
+            requested_height = dialog.winfo_reqheight()
         final_height = height or max(requested_height, min_height or 1)
         self._center_window(dialog, width=final_width, height=final_height)
         dialog.deiconify()
