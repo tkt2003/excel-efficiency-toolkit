@@ -165,13 +165,13 @@ class ExcelToolkitApp:
                 [
                     (
                         "按工作表拆分文件",
-                        "把一个 Excel 文件按工作表拆成多个文件",
+                        "",
                         "btn_export_sheets",
                         self.run_export_sheets,
                     ),
                     (
                         "按指定列拆分工作表",
-                        "按列值拆分成多个工作表",
+                        "",
                         "btn_split_sheet",
                         self.run_split_sheet,
                     ),
@@ -182,13 +182,13 @@ class ExcelToolkitApp:
                 [
                     (
                         "多表合并到一表",
-                        "把多个工作表追加合并到一个结果表",
+                        "",
                         "btn_merge_sheets",
                         self.run_merge_sheets,
                     ),
                     (
                         "多文件合并到一个文件",
-                        "把多个 Excel 文件导入到一个目标文件",
+                        "",
                         "btn_merge_workbooks",
                         self.run_merge_workbooks,
                     ),
@@ -234,7 +234,7 @@ class ExcelToolkitApp:
                 [
                     (
                         "生成带链接的工作表目录",
-                        "生成可点击跳转的工作表目录",
+                        "",
                         "btn_sheet_index",
                         self.run_sheet_index,
                     ),
@@ -249,11 +249,11 @@ class ExcelToolkitApp:
                         "btn_link_replace",
                         self.run_batch_link_replace,
                     ),
-                    ("批量删除工作表", "按规则批量删除工作表", "btn_delete_sheets", self.run_delete_sheets),
-                    ("批量重命名文件", "按规则表批量修改文件名", "btn_rename_files", self.run_batch_rename_files),
+                    ("批量删除工作表", "", "btn_delete_sheets", self.run_delete_sheets),
+                    ("批量重命名文件", "", "btn_rename_files", self.run_batch_rename_files),
                     (
                         "批量重命名工作表",
-                        "按规则表批量修改工作表名",
+                        "",
                         "btn_rename_sheets",
                         self.run_batch_rename_sheets,
                     ),
@@ -303,7 +303,7 @@ class ExcelToolkitApp:
 
         ctk.CTkLabel(
             title_block,
-            text="审计、财务、报表整理常用 Excel 工具台",
+            text="Excel 批量整理工具台",
             font=("Microsoft YaHei", 11),
             text_color="#475569",
         ).grid(row=1, column=0, sticky="w", pady=(4, 0))
@@ -345,7 +345,7 @@ class ExcelToolkitApp:
         ctk.CTkLabel(
             panel,
             text=title,
-            font=("Microsoft YaHei", 13, "bold"),
+            font=("Microsoft YaHei", 14, "bold"),
             text_color=self.text_color,
         ).grid(row=0, column=0, sticky="w", padx=12, pady=(9, 6))
 
@@ -356,9 +356,10 @@ class ExcelToolkitApp:
         return panel
 
     def _create_feature_card(self, parent, title, description, attr_name, command):
+        has_description = bool(description)
         card = ctk.CTkFrame(
             parent,
-            height=54,
+            height=58 if has_description else 46,
             fg_color="#fbfdff",
             border_width=1,
             border_color=self.border_color,
@@ -370,11 +371,17 @@ class ExcelToolkitApp:
         title_label = ctk.CTkLabel(
             card,
             text=title,
-            font=("Microsoft YaHei", 11, "bold"),
+            font=("Microsoft YaHei", 12, "bold"),
             text_color=self.text_color,
             anchor="w",
         )
-        title_label.grid(row=0, column=0, sticky="ew", padx=(12, 8), pady=(6, 0))
+        title_label.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=(12, 8),
+            pady=(7, 0) if has_description else (0, 0),
+        )
         arrow_label = ctk.CTkLabel(
             card,
             text="›",
@@ -382,16 +389,22 @@ class ExcelToolkitApp:
             text_color=self.muted_text_color,
             width=18,
         )
-        arrow_label.grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 12))
-        desc_label = ctk.CTkLabel(
-            card,
-            text=description,
-            font=("Microsoft YaHei", 10),
-            text_color="#526274",
-            anchor="w",
-            justify="left",
-        )
-        desc_label.grid(row=1, column=0, sticky="ew", padx=(12, 8), pady=(0, 5))
+        arrow_label.grid(row=0, column=1, rowspan=2 if has_description else 1, sticky="e", padx=(0, 12))
+        widgets = [card, title_label, arrow_label]
+        desc_label = None
+        if has_description:
+            desc_label = ctk.CTkLabel(
+                card,
+                text=description,
+                font=("Microsoft YaHei", 10),
+                text_color="#526274",
+                anchor="w",
+                justify="left",
+            )
+            desc_label.grid(row=1, column=0, sticky="ew", padx=(12, 8), pady=(0, 6))
+            widgets.append(desc_label)
+        else:
+            card.grid_rowconfigure(0, weight=1)
 
         def set_state(state):
             is_disabled = state == "disabled"
@@ -400,7 +413,8 @@ class ExcelToolkitApp:
                 border_color="#e5eaf0" if is_disabled else self.border_color,
             )
             title_label.configure(text_color=self.subtle_text_color if is_disabled else self.text_color)
-            desc_label.configure(text_color=self.subtle_text_color if is_disabled else "#526274")
+            if desc_label is not None:
+                desc_label.configure(text_color=self.subtle_text_color if is_disabled else "#526274")
             arrow_label.configure(text_color=self.subtle_text_color if is_disabled else self.muted_text_color)
             if is_disabled:
                 card._feature_enabled = False
@@ -412,7 +426,7 @@ class ExcelToolkitApp:
         setattr(self, attr_name, handle)
         self.feature_buttons[attr_name] = handle
         self.feature_cards[attr_name] = card
-        self._bind_card_action(card, command, [card, title_label, desc_label, arrow_label])
+        self._bind_card_action(card, command, widgets)
         return card
 
     def _bind_card_action(self, card, command, widgets):
