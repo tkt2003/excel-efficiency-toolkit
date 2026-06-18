@@ -540,6 +540,7 @@ class ExcelToolkitApp:
                 "详细说明请查看同目录下的 使用说明.txt。"
             ),
             dialog_width=460,
+            dialog_height=280,
             wraplength=420,
         )
 
@@ -553,6 +554,7 @@ class ExcelToolkitApp:
                 "当前阶段：常用功能阶段性完成"
             ),
             dialog_width=520,
+            dialog_height=300,
             wraplength=500,
         )
 
@@ -618,7 +620,7 @@ class ExcelToolkitApp:
             border_color="#e5edf5",
         )
         outer_pad = 16
-        card.pack(fill=tk.X, expand=False, padx=outer_pad, pady=outer_pad)
+        card.pack(fill=tk.BOTH, expand=True, padx=outer_pad, pady=outer_pad)
         dialog._dialog_card = card
         dialog._dialog_outer_pad_y = outer_pad
 
@@ -689,7 +691,6 @@ class ExcelToolkitApp:
         final_height = height or max(requested_height, min_height or 1)
         self._center_window(dialog, width=final_width, height=final_height)
         dialog.deiconify()
-        self._balance_dialog_outer_padding(dialog, final_width, height is not None)
         dialog.lift()
         try:
             dialog.attributes("-topmost", True)
@@ -705,40 +706,6 @@ class ExcelToolkitApp:
                 focus_widget.focus_set()
             except tk.TclError:
                 pass
-
-    def _balance_dialog_outer_padding(self, dialog, width, keep_explicit_height=False):
-        if keep_explicit_height:
-            return
-        card = getattr(dialog, "_dialog_card", None)
-        if card is None:
-            return
-
-        for _ in range(3):
-            dialog.update_idletasks()
-            if not card.winfo_exists():
-                return
-            top_gap = card.winfo_y()
-            card_height = card.winfo_height()
-            window_height = dialog.winfo_height()
-            bottom_gap = window_height - top_gap - card_height
-            excess_gap = bottom_gap - top_gap
-            if excess_gap <= 8:
-                return
-
-            geometry_size = dialog.geometry().split("+", 1)[0]
-            try:
-                _, geometry_height_text = geometry_size.split("x", 1)
-                geometry_height = int(geometry_height_text)
-            except (ValueError, IndexError):
-                return
-            if geometry_height <= 1 or window_height <= 1:
-                return
-
-            height_scale = window_height / geometry_height
-            next_height = max(1, int(round(geometry_height - excess_gap / height_scale)))
-            if next_height >= geometry_height:
-                return
-            self._center_window(dialog, width=width, height=next_height)
 
     def _schedule_smoke_dialog_close(self, dialog, close_callback=None, delay_ms=250):
         if os.environ.get("EXCEL_TOOLKIT_GUI_SMOKE") != "1":
@@ -763,7 +730,7 @@ class ExcelToolkitApp:
         default="",
         entry_width=30,
         dialog_width=520,
-        dialog_height=None,
+        dialog_height=300,
         wraplength=460,
     ):
         result = {"value": None}
@@ -814,7 +781,7 @@ class ExcelToolkitApp:
         prompt,
         choices,
         dialog_width=760,
-        dialog_height=None,
+        dialog_height=360,
         wraplength=680,
     ):
         result = {"value": None}
@@ -848,7 +815,7 @@ class ExcelToolkitApp:
         self.root.wait_variable(done)
         return result["value"]
 
-    def _show_info_no_grab(self, title, message, dialog_width=520, dialog_height=None, wraplength=460):
+    def _show_info_no_grab(self, title, message, dialog_width=560, dialog_height=300, wraplength=500):
         dialog, card = self._create_dialog_card(title)
 
         self._add_dialog_message(card, message, wraplength=wraplength, pady=(0, 12))
@@ -904,7 +871,7 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
-        self._show_dialog_no_grab(dialog, width=680)
+        self._show_dialog_no_grab(dialog, width=760, height=380)
         self._schedule_smoke_dialog_close(dialog, cancel)
         self.root.wait_variable(done)
         return result["value"]
@@ -1408,8 +1375,9 @@ class ExcelToolkitApp:
                     ("仅汇总一个 sheet", "single"),
                     ("汇总所有匹配 sheet", "all"),
                 ],
-                dialog_width=680,
-                wraplength=620,
+                dialog_width=720,
+                dialog_height=340,
+                wraplength=660,
             )
             if sum_scope is None:
                 self._log_info("用户已取消操作。")
@@ -1446,8 +1414,9 @@ class ExcelToolkitApp:
                     ("写入求和公式", "formula"),
                     ("只写入汇总数值", "value"),
                 ],
-                dialog_width=680,
-                wraplength=620,
+                dialog_width=720,
+                dialog_height=340,
+                wraplength=660,
             )
             if write_mode is None:
                 self._log_info("用户已取消操作。")
@@ -1491,6 +1460,7 @@ class ExcelToolkitApp:
                     ("多个工作簿", "multi"),
                 ],
                 dialog_width=720,
+                dialog_height=380,
                 wraplength=660,
             )
             if mode is None:
@@ -1596,6 +1566,7 @@ class ExcelToolkitApp:
                     ("多文件数据穿透查询", "multi"),
                 ],
                 dialog_width=720,
+                dialog_height=420,
                 wraplength=660,
             )
             if mode is None:
@@ -1724,6 +1695,7 @@ class ExcelToolkitApp:
                 ("替换多个链接生成", "multi"),
             ],
             dialog_width=740,
+            dialog_height=400,
             wraplength=660,
         )
         if mode is None:
@@ -1950,7 +1922,7 @@ class ExcelToolkitApp:
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.bind("<Escape>", lambda event: cancel())
-        self._show_dialog_no_grab(dialog, width=760)
+        self._show_dialog_no_grab(dialog, width=820, height=460)
         self.root.wait_variable(done)
         return result["value"]
 
@@ -2162,7 +2134,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720)
+        self._show_dialog_no_grab(dialog, width=760, height=360)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2622,7 +2594,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720)
+        self._show_dialog_no_grab(dialog, width=720, height=340)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2776,7 +2748,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720)
+        self._show_dialog_no_grab(dialog, width=760, height=360)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -2893,7 +2865,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720)
+        self._show_dialog_no_grab(dialog, width=760, height=360)
         self.root.wait_variable(done)
         return result["execute"]
 
@@ -3112,7 +3084,7 @@ class ExcelToolkitApp:
         execute_button.pack(side=tk.RIGHT, padx=(0, 8))
 
         dialog.protocol("WM_DELETE_WINDOW", cancel)
-        self._show_dialog_no_grab(dialog, width=720)
+        self._show_dialog_no_grab(dialog, width=720, height=340)
         self.root.wait_variable(done)
         return result["execute"]
 
