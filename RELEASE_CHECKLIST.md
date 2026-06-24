@@ -2,6 +2,8 @@
 
 ## 打包前检查
 
+- 完成 `SECURITY_RELEASE_CHECKLIST.md` 中的发布前安全与可靠性检查。
+
 ```powershell
 git status --short
 python -m py_compile src\excel_efficiency_toolkit\app.py

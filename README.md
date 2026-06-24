@@ -54,6 +54,8 @@ python -m src.excel_efficiency_toolkit.app
 
 发布前检查请查看：`RELEASE_CHECKLIST.md`
 
+发布前安全与可靠性检查请查看：`SECURITY_RELEASE_CHECKLIST.md`
+
 ## 开发与打包
 
 安装依赖：
