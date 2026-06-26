@@ -95,7 +95,7 @@ from .word_replace_ops import (
 )
 
 APP_NAME = "老头表格助手"
-APP_VERSION = "0.1.0"
+APP_VERSION = "1.0.0"
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
 
 ctk.set_appearance_mode("light")
