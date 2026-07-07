@@ -1,0 +1,35 @@
+# codebase-memory-mcp local/index artifacts
+.codebase-memory/
+
+# Dependencies, virtualenvs, and caches
+node_modules/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Build and release outputs
+build/
+dist/
+release/
+
+# Local test outputs and caches
+manual_test/
+.pytest_cache/
+__pycache__/
+output/
+outputs/
+temp/
+tmp/
+backup/
+backups/
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.exe
+.env
