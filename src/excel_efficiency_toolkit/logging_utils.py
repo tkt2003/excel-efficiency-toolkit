@@ -1,6 +1,26 @@
 import logging
 import tkinter as tk
 
+
+class FlushingLogger:
+    """包装 logger：每条 info/error 后调用 flush 回调强制刷新 UI。"""
+
+    def __init__(self, logger, flush):
+        self._logger = logger
+        self._flush = flush
+
+    def info(self, message):
+        self._logger.info(message)
+        self._flush()
+
+    def error(self, message):
+        self._logger.error(message)
+        self._flush()
+
+    def __getattr__(self, name):
+        return getattr(self._logger, name)
+
+
 def setup_logger(gui_text_widget=None):
     """
     配置并返回 logger。

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import os
+from datetime import datetime
+
 from openpyxl.utils.cell import coordinate_to_tuple, get_column_letter, range_boundaries
+
+from .rename_sheet_ops import is_sheet_hidden_by_visible_value
 
 
 RESULT_SHEET_BASE_NAME = "数据穿透查询结果"
@@ -236,3 +241,204 @@ def _pad_matrix(rows: list[list[object]], width: int, height: int) -> list[list[
             normalized_row.extend([None] * (width - len(normalized_row)))
         normalized_rows.append(normalized_row)
     return normalized_rows
+
+
+# ---------------------------------------------------------------------------
+# Excel COM 活动会话读取（原 app.py 数据穿透逻辑）
+# ---------------------------------------------------------------------------
+def format_drill_context_steps(steps: list[str]) -> str:
+    return "、".join(steps) if steps else "尚未连接 Excel"
+
+
+def get_selection_range_address(excel) -> str:
+    """读取当前选区地址并规范化；多区域选区抛错。"""
+    try:
+        selection = excel.Selection
+    except Exception as e:
+        raise RuntimeError(f"已连接 Excel，但无法读取当前 Selection：{e}") from e
+
+    if selection is None:
+        raise RuntimeError("已连接 Excel，但当前没有可识别的选区。")
+    try:
+        areas = selection.Areas.Count
+    except Exception:
+        areas = 1
+    if areas and int(areas) > 1:
+        raise RuntimeError("不支持多区域选区，请只选择一个连续区域后重试。")
+
+    try:
+        address_member = selection.Address
+        if callable(address_member):
+            address = address_member(False, False)
+        else:
+            address = address_member
+    except Exception:
+        address = selection.Address(False, False)
+    normalized_address = normalize_range_address(address)
+    if is_multi_area_range(normalized_address):
+        raise RuntimeError("不支持多区域选区，请只选择一个连续区域后重试。")
+    return normalized_address
+
+
+def get_active_drill_context(require_saved_workbook: bool) -> dict:
+    """在独立 COM 会话中读取活动工作簿/工作表/选区上下文。"""
+    try:
+        import pythoncom
+        import win32com.client
+    except Exception as e:
+        raise RuntimeError("无法加载 Excel COM 组件，请确认已安装 pywin32 并在 Windows + Excel 环境运行。") from e
+
+    pythoncom.CoInitialize()
+    steps = []
+    try:
+        try:
+            excel = win32com.client.GetActiveObject("Excel.Application")
+        except Exception as e:
+            raise RuntimeError(
+                "未检测到正在运行的 Excel，请先打开目标/合并工作簿后重试。"
+                "当前步骤：尚未连接 Excel。"
+            ) from e
+        steps.append("已连接 Excel")
+
+        try:
+            workbook = excel.ActiveWorkbook
+        except Exception as e:
+            raise RuntimeError(
+                "Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。"
+                f"当前步骤：{format_drill_context_steps(steps)}。"
+            ) from e
+        if workbook is None:
+            raise RuntimeError(
+                "Excel 中没有活动工作簿，请先打开目标/合并工作簿后重试。"
+                f"当前步骤：{format_drill_context_steps(steps)}。"
+            )
+        steps.append("已取得 ActiveWorkbook")
+
+        workbook_name = str(workbook.Name)
+        workbook_dir = str(workbook.Path or "").strip()
+        if require_saved_workbook and not workbook_dir:
+            raise RuntimeError(
+                "当前活动工作簿尚未保存，无法确定结果文件输出目录。请先保存当前工作簿后重试。"
+                f"当前步骤：{format_drill_context_steps(steps)}。"
+            )
+        workbook_path = str(workbook.FullName or "").strip()
+        if workbook_path and not os.path.dirname(workbook_path) and workbook_dir:
+            workbook_path = os.path.join(workbook_dir, workbook_name)
+        workbook_path_text = workbook_path or workbook_name
+        steps.append("已取得工作簿保存路径")
+
+        try:
+            active_sheet = excel.ActiveSheet
+            sheet_name = str(active_sheet.Name)
+        except Exception as e:
+            raise RuntimeError(
+                "无法读取当前活动 Sheet，请先切换到目标工作表后重试。"
+                f"当前步骤：{format_drill_context_steps(steps)}。"
+            ) from e
+        if not sheet_name:
+            raise RuntimeError(
+                "无法读取当前活动 Sheet，请先切换到目标工作表后重试。"
+                f"当前步骤：{format_drill_context_steps(steps)}。"
+            )
+        steps.append("已取得 ActiveSheet")
+
+        range_address = get_selection_range_address(excel)
+        if not range_address:
+            raise RuntimeError(
+                "没有有效选区，请先选中一个需要追查的单元格或区域后重试。"
+                f"当前步骤：{format_drill_context_steps(steps)}，但未取得 ActiveCell 或可用 Selection。"
+            )
+        steps.append("已取得 Selection")
+
+        return {
+            "workbook_name": workbook_name,
+            "workbook_path": workbook_path,
+            "workbook_path_text": workbook_path_text,
+            "output_dir": workbook_dir,
+            "workbook_dir": workbook_dir,
+            "sheet_name": sheet_name,
+            "range_address": range_address,
+        }
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def read_range_values_from_com_sheet(sheet, range_address: str, logger=None) -> dict:
+    """读取 COM 工作表指定区域的值映射；读取异常时每个地址填入异常说明。"""
+    try:
+        raw_value = sheet.Range(range_address).Value
+        return range_value_to_address_map(range_address, raw_value)
+    except Exception as e:
+        message = f"读取异常：{e}"
+        if logger is not None:
+            logger.error(f"{sheet.Name}!{range_address} 读取失败：{message}")
+        return {address: message for address in expand_range_addresses(range_address)}
+
+
+def execute_single_workbook_drill(excel, logger=None) -> dict:
+    """对活动工作簿执行单文件数据穿透：遍历可见工作表读取同选区值并写入结果工作表。
+
+    返回结果摘要 dict，结果提示对话框由调用方负责。工作簿不会被自动保存。
+    """
+    workbook = excel.ActiveWorkbook
+    if workbook is None:
+        raise RuntimeError("Excel 中没有活动工作簿，请先打开目标工作簿后重试。")
+
+    active_sheet = excel.ActiveSheet
+    if active_sheet is None or not str(active_sheet.Name):
+        raise RuntimeError("无法读取当前活动 Sheet，请先切换到目标工作表后重试。")
+
+    range_address = get_selection_range_address(excel)
+    workbook_name = str(workbook.Name)
+    workbook_path = str(workbook.FullName or "").strip()
+    workbook_path_text = workbook_path or workbook_name
+    sheet_name = str(active_sheet.Name)
+
+    if logger is not None:
+        logger.info(f"当前工作簿：{workbook_path_text}")
+        logger.info(f"当前工作表：{sheet_name}")
+        logger.info(f"当前选区：{range_address}")
+
+    records = []
+    visible_sheet_count = 0
+    for sheet in workbook.Worksheets:
+        if is_sheet_hidden_by_visible_value(sheet.Visible):
+            continue
+        if should_skip_history_result_sheet(str(sheet.Name), RESULT_SHEET_BASE_NAME):
+            continue
+
+        visible_sheet_count += 1
+        values_by_address = read_range_values_from_com_sheet(sheet, range_address, logger=logger)
+        records.append(
+            {
+                "sheet_name": str(sheet.Name),
+                "visible_status": "可见",
+                "values_by_address": values_by_address,
+            }
+        )
+
+    result_sheet_name = build_unique_result_sheet_name([str(sheet.Name) for sheet in workbook.Worksheets])
+    result_sheet = workbook.Worksheets.Add(After=workbook.Worksheets(workbook.Worksheets.Count))
+    result_sheet.Name = result_sheet_name
+    write_single_workbook_drill_result_to_com_sheet(
+        sheet=result_sheet,
+        base_sheet_name=sheet_name,
+        range_address=range_address,
+        created_at_text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        records=records,
+    )
+
+    if logger is not None:
+        logger.info(f"读取工作表数量：{visible_sheet_count}")
+        logger.info(f"结果工作表：{result_sheet_name}")
+        logger.info("数据穿透查询（单文件）完成。")
+        logger.info("当前活动工作簿已新增结果工作表，但未自动保存。")
+
+    return {
+        "workbook_name": workbook_name,
+        "workbook_path_text": workbook_path_text,
+        "sheet_name": sheet_name,
+        "range_address": range_address,
+        "visible_sheet_count": visible_sheet_count,
+        "result_sheet_name": result_sheet_name,
+    }

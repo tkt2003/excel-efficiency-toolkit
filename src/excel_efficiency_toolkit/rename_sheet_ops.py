@@ -322,6 +322,97 @@ def is_sheet_hidden_by_visible_value(visible_value) -> bool:
     return visible_value not in (-1, True, "visible")
 
 
+def read_workbook_sheet_infos(workbook) -> list[dict]:
+    """读取 COM 工作簿的工作表名、可见状态和顺序。"""
+    sheet_infos = []
+    for index, sheet in enumerate(workbook.Worksheets, start=1):
+        sheet_infos.append(
+            {
+                "name": sheet.Name,
+                "is_hidden": is_sheet_hidden_by_visible_value(sheet.Visible),
+                "order": index,
+            }
+        )
+    return sheet_infos
+
+
+def read_sheet_infos_from_workbook_files(source_paths: list[str], logger=None) -> list[dict]:
+    """在独立 Excel COM 会话中只读打开每个文件，收集工作表清单。
+
+    单个文件失败不会中断，错误记录在对应 workbook_info["error"] 中。
+    """
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    excel = None
+    workbook = None
+    workbook_infos = []
+
+    try:
+        excel = win32com.client.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        for source_path in source_paths:
+            workbook = None
+            abs_path = os.path.abspath(source_path)
+            workbook_info = {
+                "workbook_path": abs_path,
+                "workbook_name": os.path.basename(abs_path),
+                "sheet_infos": [],
+            }
+            if is_office_temp_file(abs_path):
+                workbook_info["error"] = "临时文件已跳过"
+                workbook_infos.append(workbook_info)
+                continue
+            if not is_excel_workbook_file(abs_path):
+                workbook_info["error"] = "不是支持的 Excel 文件"
+                workbook_infos.append(workbook_info)
+                continue
+            if not os.path.exists(abs_path):
+                workbook_info["error"] = "原文件不存在"
+                workbook_infos.append(workbook_info)
+                continue
+
+            try:
+                if logger is not None:
+                    logger.info(f"正在读取工作表清单：{abs_path}")
+                workbook = excel.Workbooks.Open(
+                    abs_path,
+                    ReadOnly=True,
+                    UpdateLinks=0,
+                )
+                workbook_info["workbook_name"] = workbook.Name
+                workbook_info["sheet_infos"] = read_workbook_sheet_infos(workbook)
+            except Exception as e:
+                workbook_info["error"] = f"文件打开失败：{e}"
+            finally:
+                if workbook is not None:
+                    try:
+                        workbook.Close(SaveChanges=False)
+                    except Exception:
+                        pass
+                    workbook = None
+
+            workbook_infos.append(workbook_info)
+
+        return workbook_infos
+
+    finally:
+        if workbook is not None:
+            try:
+                workbook.Close(SaveChanges=False)
+            except Exception:
+                pass
+        if excel is not None:
+            try:
+                excel.Quit()
+            except Exception:
+                pass
+        pythoncom.CoUninitialize()
+
+
 def _build_base_sheet_action(
     rule: SheetRenameRule,
     existing_names: dict[str, str],
