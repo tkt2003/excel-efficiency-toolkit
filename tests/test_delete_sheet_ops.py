@@ -260,3 +260,27 @@ def test_copy_source_to_output_copies_file_and_avoids_overwrite(tmp_path):
     assert copied_path == str(output_dir / "源_2.xlsx")
     assert (output_dir / "源_2.xlsx").read_text(encoding="utf-8") == "source"
     assert existing_path.read_text(encoding="utf-8") == "existing"
+
+
+def test_resolve_delete_mode_from_rule_table_returns_inferred_mode(monkeypatch):
+    from src.excel_efficiency_toolkit import delete_sheet_ops
+
+    monkeypatch.setattr(
+        delete_sheet_ops,
+        "read_rule_values_from_rule_table",
+        lambda path: {"keep_names": ["首页"], "delete_names": []},
+    )
+
+    assert delete_sheet_ops.resolve_delete_mode_from_rule_table("规则.xlsx") == "keep"
+
+
+def test_resolve_delete_mode_from_rule_table_returns_none_when_ambiguous(monkeypatch):
+    from src.excel_efficiency_toolkit import delete_sheet_ops
+
+    monkeypatch.setattr(
+        delete_sheet_ops,
+        "read_rule_values_from_rule_table",
+        lambda path: {"keep_names": ["首页"], "delete_names": ["草稿"]},
+    )
+
+    assert delete_sheet_ops.resolve_delete_mode_from_rule_table("规则.xlsx") is None

@@ -486,6 +486,12 @@ def read_rule_values_from_rule_table(rule_table_path: str) -> dict:
         pythoncom.CoUninitialize()
 
 
+def resolve_delete_mode_from_rule_table(rule_table_path: str) -> str | None:
+    """读取规则表并推断执行模式；B/C 列都填写时无法推断，返回 None 由调用方决定。"""
+    rule_values = read_rule_values_from_rule_table(rule_table_path)
+    return infer_delete_mode_from_rule_values(rule_values)
+
+
 def execute_batch_delete_sheets(
     source_paths: list[str],
     rule_table_path: str,
