@@ -1,61 +1,74 @@
 # -*- coding: utf-8 -*-
-"""UI 设计 token 唯一来源：颜色、字体、窗口尺寸。
+"""应用级设计令牌。
 
-设计方向："冷静高对比的软蓝工作台" + 适老化可读性：
-白色表面浮在冷灰蓝画布上，单一强调蓝贯穿主按钮/选中态，
-正文对比度提高，整体字号加大一档（字号变化必须配对高度变化）。
-除本模块外，ui/ 下不允许出现 hex 颜色或字体字面量。
+v1.1 采用「深海蓝导航 + 雾白工作台 + 翡翠绿强调」的视觉体系。
+除本模块外，ui/ 下不应新增颜色字面量，避免不同页面形成第二套主题。
 """
 import customtkinter as ctk
 
-# ---------------------------------------------------------------------------
-# 颜色
-# ---------------------------------------------------------------------------
-BG = "#f3f6fa"                  # 窗口画布
-SURFACE = "#ffffff"             # 卡片 / 面板 / 对话框表面
-SURFACE_RAISED = "#fbfdff"      # 功能卡片、输入框、预览区表面
-SURFACE_SUNKEN = "#f8fafc"      # 日志文本框背景
-SURFACE_HOVER = "#eaf3fc"       # 功能卡片悬停
-SURFACE_DISABLED = "#f6f8fa"    # 功能卡片禁用
+# 画布与表面
+BG = "#f2f5f9"
+SURFACE = "#ffffff"
+SURFACE_RAISED = "#f8fafc"
+SURFACE_SUNKEN = "#f5f7fa"
+SURFACE_HOVER = "#f0f6f5"
+SURFACE_DISABLED = "#f3f5f7"
 
-BORDER = "#d8e0ea"              # 通用边框
-BORDER_SOFT = "#e5edf5"         # 面板 / 对话框边框
-BORDER_HOVER = "#a9c4e0"        # 功能卡片悬停边框
-BORDER_DISABLED = "#e5eaf0"     # 功能卡片禁用边框
-BORDER_BUTTON = "#dfe7f1"       # 头部次要按钮边框
+# 侧栏
+SIDEBAR = "#10243e"
+SIDEBAR_RAISED = "#193451"
+SIDEBAR_HOVER = "#1d3b5a"
+SIDEBAR_TEXT = "#f7fafc"
+SIDEBAR_TEXT_MUTED = "#a9bdd0"
 
-TEXT = "#1b2a3b"                # 正文（白底约 13:1 对比度）
-TEXT_STRONG = "#111827"         # 日志正文
-TEXT_SECONDARY = "#44576d"      # 副标题 / 卡片描述（白底 ≥7:1）
-TEXT_MUTED = "#64748b"          # 弱化说明文字
-TEXT_DISABLED = "#9aa8b8"       # 禁用态文字（只用于禁用，不作正文）
-TEXT_ON_ACCENT = "#ffffff"      # 主按钮文字
+# 边界与文字
+BORDER = "#dce4ec"
+BORDER_SOFT = "#e7edf3"
+BORDER_HOVER = "#86b9ad"
+BORDER_DISABLED = "#e5e9ee"
+BORDER_BUTTON = "#dbe3eb"
+TEXT = "#172438"
+TEXT_STRONG = "#0d1726"
+TEXT_SECONDARY = "#52657a"
+TEXT_MUTED = "#78899a"
+TEXT_DISABLED = "#a8b3bf"
+TEXT_ON_ACCENT = "#ffffff"
 
-ACCENT = "#2f6bb0"              # 主强调色（主按钮、单选、复选、分区标题条）
-ACCENT_HOVER = "#275b98"        # 主强调悬停（同色系加深，替换原饱和 #1d4ed8）
-ACCENT_SOFT = "#dbeafe"         # 强调浅底
+# 品牌色与状态色
+ACCENT = "#16836f"
+ACCENT_HOVER = "#116c5c"
+ACCENT_DARK = "#0f5b50"
+ACCENT_SOFT = "#dff3ee"
+ACCENT_PALE = "#edf8f5"
+SUCCESS = "#37c99a"
 
 BUTTON_SECONDARY_BG = "#f8fafc"
-BUTTON_SECONDARY_HOVER = "#e9eef5"
-HEADER_BUTTON_HOVER = "#eef4fb"
+BUTTON_SECONDARY_HOVER = "#edf2f6"
+HEADER_BUTTON_HOVER = "#eef4f7"
+SCROLLBAR = "#c7d2dd"
+SCROLLBAR_HOVER = "#9babb9"
 
-SCROLLBAR = "#cbd5e1"
-SCROLLBAR_HOVER = "#94a3b8"
-
-# ---------------------------------------------------------------------------
-# 字体（整体加大一档，配套高度见"尺寸"段）
-# ---------------------------------------------------------------------------
+# 字体
 FONT_FAMILY = "Microsoft YaHei UI"
 FONT_MONO = "Consolas"
-
-HEADER_TITLE_FONT = (FONT_FAMILY, 20, "bold")
+BRAND_FONT = (FONT_FAMILY, 19, "bold")
+BRAND_MARK_FONT = (FONT_FAMILY, 18, "bold")
+NAV_FONT = (FONT_FAMILY, 14)
+NAV_FONT_ACTIVE = (FONT_FAMILY, 14, "bold")
+HEADER_TITLE_FONT = (FONT_FAMILY, 22, "bold")
 HEADER_SUBTITLE_FONT = (FONT_FAMILY, 12)
 HEADER_BUTTON_FONT = (FONT_FAMILY, 13)
-SECTION_TITLE_FONT = (FONT_FAMILY, 17, "bold")
-CARD_TITLE_FONT = (FONT_FAMILY, 14, "bold")
-CARD_DESCRIPTION_FONT = (FONT_FAMILY, 13)
-LOG_TITLE_FONT = (FONT_FAMILY, 13, "bold")
-LOG_FONT = (FONT_MONO, 13)
+HERO_KICKER_FONT = (FONT_FAMILY, 12, "bold")
+HERO_TITLE_FONT = (FONT_FAMILY, 28, "bold")
+HERO_BODY_FONT = (FONT_FAMILY, 14)
+SECTION_TITLE_FONT = (FONT_FAMILY, 18, "bold")
+SECTION_META_FONT = (FONT_FAMILY, 12)
+CARD_TITLE_FONT = (FONT_FAMILY, 15, "bold")
+CARD_DESCRIPTION_FONT = (FONT_FAMILY, 12)
+CARD_ICON_FONT = (FONT_FAMILY, 16, "bold")
+CARD_ACTION_FONT = (FONT_FAMILY, 18)
+LOG_TITLE_FONT = (FONT_FAMILY, 12, "bold")
+LOG_FONT = (FONT_FAMILY, 12)
 
 DIALOG_TITLE_FONT = (FONT_FAMILY, 20, "bold")
 DIALOG_BODY_FONT = (FONT_FAMILY, 16)
@@ -66,23 +79,21 @@ LABEL_BOLD_FONT = (FONT_FAMILY, 13, "bold")
 SMALL_FONT = (FONT_FAMILY, 12)
 PREVIEW_FONT = (FONT_MONO, 12)
 
-# ---------------------------------------------------------------------------
-# 尺寸（与字号配对：卡片/按钮加高避免中文被裁）
-# ---------------------------------------------------------------------------
-WINDOW_GEOMETRY = "1200x800"
-WINDOW_MIN_SIZE = (1140, 720)
-
-CARD_HEIGHT = 58                # 无描述功能卡片高度
-CARD_HEIGHT_WITH_DESC = 80      # 带描述功能卡片高度
+# 尺寸
+WINDOW_GEOMETRY = "1320x860"
+WINDOW_MIN_SIZE = (1120, 720)
+SIDEBAR_WIDTH = 246
+HEADER_HEIGHT = 82
+FEATURE_CARD_HEIGHT = 112
+CATEGORY_CARD_HEIGHT = 128
 DIALOG_BUTTON_HEIGHT = 40
 ENTRY_HEIGHT = 36
-LOG_AREA_HEIGHT = 150
-LOG_TEXT_HEIGHT = 96
-SECTION_BAR_WIDTH = 3           # 分区标题左侧强调条宽度
-SECTION_BAR_HEIGHT = 20
+LOG_AREA_HEIGHT = 158
+LOG_COLLAPSED_HEIGHT = 48
+LOG_TEXT_HEIGHT = 92
 
 
 def apply_appearance():
-    """设置 CustomTkinter 全局外观，必须在创建任何窗口前调用。"""
+    """在创建任何窗口前应用 CustomTkinter 全局外观。"""
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")

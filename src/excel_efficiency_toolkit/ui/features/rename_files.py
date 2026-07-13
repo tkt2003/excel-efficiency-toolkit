@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 from ...rename_file_ops import (
+    RENAME_RULE_FILENAME_PREFIX,
     build_rename_plan,
     create_rename_rule_workbook,
     execute_rename_plan,
@@ -15,16 +16,41 @@ from ...rename_file_ops import (
 from .base import FeatureController
 
 
+def _raise_walk_error(error):
+    raise error
+
+
+def _is_rename_scan_artifact(file_name):
+    if file_name.startswith("~$"):
+        return True
+    return file_name.startswith(RENAME_RULE_FILENAME_PREFIX) and file_name.lower().endswith(".xlsx")
+
+
 class RenameFilesController(FeatureController):
     def run_batch_rename_files(self):
         """按钮回调函数，生成临时规则表后确认执行批量重命名文件"""
         self.logger.info("批量重命名文件：开始操作。")
-        source_paths = filedialog.askopenfilenames(
-            title="请选择需要批量重命名的文件",
-            filetypes=[("所有文件", "*.*")],
+        selection_mode = self.ask_choice(
+            "批量重命名文件",
+            (
+                "请选择文件来源：\n\n"
+                "选择文件：适合只处理少量指定文件，最安全；\n"
+                "选择文件夹：处理所选目录及其所有子文件夹中的文件，更方便。"
+            ),
+            [
+                ("选择文件", "files"),
+                ("选择文件夹", "folder"),
+            ],
+            dialog_width=620,
+            dialog_height=330,
+            wraplength=560,
         )
-        if not source_paths:
+        if selection_mode is None:
             self.logger.info("用户已取消操作")
+            return
+
+        source_paths = self._select_source_paths(selection_mode)
+        if not source_paths:
             return
 
         self.button("btn_rename_files").config(state="disabled")
@@ -49,6 +75,50 @@ class RenameFilesController(FeatureController):
             )
         finally:
             self.button("btn_rename_files").config(state="normal")
+
+    def _select_source_paths(self, selection_mode):
+        if selection_mode == "files":
+            source_paths = filedialog.askopenfilenames(
+                title="请选择需要批量重命名的文件",
+                filetypes=[("所有文件", "*.*")],
+            )
+            if not source_paths:
+                self.logger.info("用户已取消操作")
+                return []
+            return list(source_paths)
+
+        if selection_mode != "folder":
+            raise ValueError(f"未知文件选择方式：{selection_mode}")
+
+        folder_path = filedialog.askdirectory(
+            title="请选择包含待重命名文件的文件夹",
+        )
+        if not folder_path:
+            self.logger.info("用户已取消操作")
+            return []
+
+        source_paths = []
+        for current_dir, directory_names, file_names in os.walk(
+            folder_path,
+            onerror=_raise_walk_error,
+        ):
+            directory_names.sort(key=str.casefold)
+            file_names.sort(key=str.casefold)
+            source_paths.extend(
+                os.path.join(current_dir, file_name)
+                for file_name in file_names
+                if not _is_rename_scan_artifact(file_name)
+            )
+        if not source_paths:
+            self.logger.info(f"所选文件夹中没有可重命名的文件：{folder_path}")
+            self.show_info(
+                "批量重命名文件",
+                "所选文件夹中没有可重命名的文件。",
+            )
+            return []
+
+        self.logger.info(f"已选择文件夹：{folder_path}")
+        return source_paths
 
     def _confirm_rename_rule_ready(self, rule_workbook_path):
         result = {"execute": False}
