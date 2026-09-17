@@ -33,7 +33,10 @@ def setup_logger(gui_text_widget=None):
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     # 控制台输出 Handler
     console_handler = logging.StreamHandler()

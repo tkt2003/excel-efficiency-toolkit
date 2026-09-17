@@ -13,6 +13,7 @@ INSTRUCTION_SHEET_NAME = "使用说明"
 SETTINGS_SHEET_NAME = "参数设置"
 RULE_SHEET_NAME = "重命名清单"
 LOG_SHEET_NAME = "处理日志"
+RENAME_RULE_FILENAME_PREFIX = "批量重命名规则_"
 
 RULE_HEADERS = [
     "原文件路径",
@@ -64,7 +65,7 @@ def create_rename_rule_workbook(file_paths: list[str], output_dir: str | None = 
     target_dir = Path(output_dir).resolve() if output_dir else _infer_output_dir(valid_paths)
     target_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = _get_unique_path(target_dir / f"批量重命名规则_{timestamp}.xlsx")
+    output_path = _get_unique_path(target_dir / f"{RENAME_RULE_FILENAME_PREFIX}{timestamp}.xlsx")
 
     workbook = Workbook()
     instruction_sheet = workbook.active

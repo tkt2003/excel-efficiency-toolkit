@@ -1,1 +1,3 @@
-# Excel Efficiency Toolkit Package
+"""老头表格助手。"""
+
+__version__ = "1.1.0"
