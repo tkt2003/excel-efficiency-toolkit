@@ -57,10 +57,16 @@ def build_feature_groups(controllers):
                     controllers.export_split.run_export_sheets,
                 ),
                 FeatureSpec(
-                    "按指定列拆分工作表",
-                    "依据列值自动分组并生成对应工作表或文件",
+                    "按列拆分",
+                    "按指定列内容拆分为工作表或多个 Excel 文件",
                     "btn_split_sheet",
                     controllers.export_split.run_split_sheet,
+                ),
+                FeatureSpec(
+                    "按行拆分",
+                    "按数据行拆分为工作表或多个 Excel 文件",
+                    "btn_split_rows",
+                    controllers.export_split.run_split_rows,
                 ),
             ),
         ),
