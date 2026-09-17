@@ -31,7 +31,7 @@ def _controllers():
 
 
 def test_ui_version_uses_package_version():
-    assert __version__ == "1.1.0"
+    assert __version__ == "1.2.0"
     assert APP_VERSION == __version__
 
 
