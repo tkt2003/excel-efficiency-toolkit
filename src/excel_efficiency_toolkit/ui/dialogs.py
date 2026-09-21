@@ -265,3 +265,246 @@ class DialogService:
             return int(value.strip())
         except ValueError:
             raise ValueError(f"{prompt}必须是整数。")
+
+    def ask_column(
+        self,
+        title,
+        prompt,
+        columns: list[tuple[str, str]],
+        default="A",
+        allow_empty=False,
+        dialog_width=520,
+        dialog_height=480,
+    ):
+        """通用列选择弹窗。
+
+        展示列表如 'A | 物料编码'，支持点击选择，也支持手动输入列字母。
+        返回选中的列字母（如 'B'），若取消返回 None，若允许空且用户跳过返回空字符串 ''。
+        """
+        result = {"value": None}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog, card = self.create_dialog_card(title)
+
+        self.add_message(card, prompt, wraplength=460, pady=(0, 8))
+
+        scroll_frame = ctk.CTkScrollableFrame(
+            card,
+            height=200,
+            fg_color=theme.SURFACE_SUNKEN,
+            border_width=1,
+            border_color=theme.BORDER_SOFT,
+            corner_radius=8,
+        )
+        scroll_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
+
+        input_frame = ctk.CTkFrame(card, fg_color="transparent")
+        input_frame.pack(fill=tk.X, padx=16, pady=(0, 10))
+
+        ctk.CTkLabel(
+            input_frame,
+            text="选择或输入列字母：",
+            font=theme.LABEL_FONT,
+            text_color=theme.TEXT,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        entry = ctk.CTkEntry(
+            input_frame,
+            font=theme.ENTRY_FONT,
+            width=120,
+            height=theme.ENTRY_HEIGHT,
+            fg_color=theme.SURFACE_RAISED,
+            border_color=theme.BORDER,
+            text_color=theme.TEXT,
+        )
+        entry.pack(side=tk.LEFT)
+        entry.insert(0, default or "")
+
+        item_buttons = []
+
+        def select_col(col_letter):
+            entry.delete(0, tk.END)
+            entry.insert(0, col_letter)
+            for b_col, b_widget in item_buttons:
+                if b_col == col_letter:
+                    b_widget.configure(
+                        fg_color=theme.ACCENT,
+                        text_color=theme.TEXT_ON_ACCENT,
+                    )
+                else:
+                    b_widget.configure(
+                        fg_color="transparent",
+                        text_color=theme.TEXT,
+                    )
+
+        for col, col_title in columns:
+            display_text = f"{col} | {col_title}" if col_title else f"{col} | (空白)"
+            btn = AppButton(
+                scroll_frame,
+                text=display_text,
+                command=lambda c=col: select_col(c),
+                anchor="w",
+                font=theme.DIALOG_BODY_FONT,
+                height=30,
+                fg_color=theme.ACCENT if col == default else "transparent",
+                text_color=theme.TEXT_ON_ACCENT if col == default else theme.TEXT,
+                hover_color=theme.BUTTON_SECONDARY_HOVER,
+                corner_radius=6,
+            )
+            btn.pack(fill=tk.X, padx=4, pady=2)
+            btn.bind("<Double-Button-1>", lambda event, c=col: (select_col(c), confirm()))
+            item_buttons.append((col, btn))
+
+        button_frame = self.create_button_bar(card)
+
+        def confirm():
+            val = entry.get().strip().upper()
+            if not val:
+                if allow_empty:
+                    result["value"] = ""
+                    done.set(True)
+                    dialog.destroy()
+                    return
+                return
+            result["value"] = val
+            done.set(True)
+            dialog.destroy()
+
+        def skip():
+            result["value"] = ""
+            done.set(True)
+            dialog.destroy()
+
+        def cancel():
+            result["value"] = None
+            done.set(True)
+            dialog.destroy()
+
+        self.add_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        if allow_empty:
+            self.add_button(button_frame, "不使用 / 跳过", skip).pack(side=tk.RIGHT, padx=(0, 8))
+        self.add_button(button_frame, "确定", confirm, primary=True).pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.bind("<Return>", lambda event: confirm())
+        dialog.bind("<Escape>", lambda event: cancel())
+
+        self.show_no_grab(dialog, focus_widget=entry, width=dialog_width, height=dialog_height)
+        self.schedule_smoke_close(dialog, cancel)
+        self.root.wait_variable(done)
+        return result["value"]
+
+    def ask_split_preview(
+        self,
+        title: str,
+        preview_items: list[tuple[str, str]],
+        prompt: str = "请确认以下拆分参数是否正确，确认后将开始执行：",
+        dialog_width=520,
+        dialog_height=420,
+    ) -> bool:
+        """拆分执行前预览确认弹窗。返回 True（确认执行）或 False（取消）。"""
+        result = {"confirmed": False}
+        done = tk.BooleanVar(master=self.root, value=False)
+        dialog, card = self.create_dialog_card(title)
+
+        self.add_message(card, prompt, wraplength=460, pady=(0, 10))
+
+        info_frame = ctk.CTkFrame(
+            card,
+            fg_color=theme.SURFACE_SUNKEN,
+            border_width=1,
+            border_color=theme.BORDER_SOFT,
+            corner_radius=8,
+        )
+        info_frame.pack(fill=tk.X, padx=16, pady=(0, 14))
+
+        for row_idx, (label, val) in enumerate(preview_items):
+            ctk.CTkLabel(
+                info_frame,
+                text=f"{label}：",
+                font=theme.LABEL_BOLD_FONT,
+                text_color=theme.TEXT_SECONDARY,
+                anchor="e",
+                width=110,
+            ).grid(row=row_idx, column=0, sticky="e", padx=(14, 6), pady=4)
+
+            ctk.CTkLabel(
+                info_frame,
+                text=str(val),
+                font=theme.DIALOG_BODY_FONT,
+                text_color=theme.TEXT_STRONG,
+                anchor="w",
+                justify="left",
+                wraplength=320,
+            ).grid(row=row_idx, column=1, sticky="w", padx=(0, 14), pady=4)
+
+        button_frame = self.create_button_bar(card)
+
+        def confirm():
+            result["confirmed"] = True
+            done.set(True)
+            dialog.destroy()
+
+        def cancel():
+            result["confirmed"] = False
+            done.set(True)
+            dialog.destroy()
+
+        self.add_button(button_frame, "取消", cancel).pack(side=tk.RIGHT)
+        self.add_button(button_frame, "开始执行", confirm, primary=True).pack(side=tk.RIGHT, padx=(0, 8))
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.bind("<Return>", lambda event: confirm())
+        dialog.bind("<Escape>", lambda event: cancel())
+
+        self.show_no_grab(dialog, width=dialog_width, height=dialog_height)
+        self.schedule_smoke_close(dialog, cancel)
+        self.root.wait_variable(done)
+        return result["confirmed"]
+
+    def create_progress_cancel_dialog(
+        self,
+        title: str,
+        initial_message: str,
+        on_cancel=None,
+        dialog_width=420,
+        dialog_height=200,
+    ):
+        """创建执行过程中的取消控制弹窗，返回控制器对象（包含 update_message 与 close 方法）。"""
+        dialog, card = self.create_dialog_card(title)
+
+        status_label = self.add_message(card, initial_message, wraplength=360, pady=(0, 14))
+        button_frame = self.create_button_bar(card)
+
+        cancelled = [False]
+
+        def cancel():
+            if not cancelled[0]:
+                cancelled[0] = True
+                cancel_btn.configure(text="正在取消...", state="disabled")
+                if on_cancel:
+                    on_cancel()
+
+        cancel_btn = self.add_button(button_frame, "取消执行", cancel, primary=False)
+        cancel_btn.pack(side=tk.RIGHT)
+
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.bind("<Escape>", lambda event: cancel())
+
+        self.show_no_grab(dialog, width=dialog_width, height=dialog_height)
+
+        class ProgressController:
+            def update_message(self_, msg):
+                try:
+                    if dialog.winfo_exists():
+                        status_label.configure(text=msg)
+                except tk.TclError:
+                    pass
+
+            def close(self_):
+                try:
+                    if dialog.winfo_exists():
+                        dialog.destroy()
+                except tk.TclError:
+                    pass
+
+        return ProgressController()
