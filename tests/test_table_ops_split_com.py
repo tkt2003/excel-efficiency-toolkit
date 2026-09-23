@@ -183,6 +183,11 @@ class _FakeExcel:
         self.fail_save = fail_save
         self.created_workbooks = []
         self.copy_calls = []
+        self.quit_called = False
+        self.Workbooks = _FakeWorksheets([])
+
+    def Quit(self):
+        self.quit_called = True
 
     def copy_sheet_to_new_workbook(self, source_sheet):
         output_workbook = _FakeWorkbook(
@@ -942,4 +947,421 @@ def test_split_active_sheet_by_rows(monkeypatch):
 
     result = table_ops.split_active_sheet_by_rows(rows_per_part=2)
     assert result["created_sheet_count"] == 3
+
+
+def test_split_by_rows_with_name_column_generates_named_files(monkeypatch, tmp_path):
+    source_values = [
+        ["序号", "姓名", "金额"],
+        [1, "张三", 100],
+        [2, "李四", 200],
+    ]
+    excel = _FakeExcel()
+    workbook = _FakeWorkbook(
+        [{"name": "源表", "values": source_values}],
+        application=excel,
+    )
+    excel.source_workbook = workbook
+    excel.ActiveWorkbook = workbook
+    monkeypatch.setattr(table_ops, "_get_or_open_workbook", lambda *args, **kwargs: workbook)
+
+    result = table_ops.split_workbook_sheet_by_rows_to_files(
+        source_path="D:/测试/源文件.xlsx",
+        source_sheet_name="源表",
+        output_dir=str(tmp_path),
+        rows_per_part=1,
+        header_row=1,
+        data_start_row=2,
+        name_column="B",
+    )
+
+    assert result["created_file_count"] == 2
+    assert any(p.endswith("张三.xlsx") for p in result["output_paths"])
+    assert any(p.endswith("李四.xlsx") for p in result["output_paths"])
+
+
+def test_split_by_rows_chinese_filename(monkeypatch, tmp_path):
+    source_values = [
+        ["工号", "部门姓名", "绩效"],
+        ["E001", "财务部/王主管", "A"],
+        ["E002", "  市场运营部*李专员  ", "B"],
+    ]
+    excel = _FakeExcel()
+    workbook = _FakeWorkbook(
+        [{"name": "源表", "values": source_values}],
+        application=excel,
+    )
+    excel.source_workbook = workbook
+    excel.ActiveWorkbook = workbook
+
+    monkeypatch.setattr(table_ops, "_get_or_open_workbook", lambda *args, **kwargs: workbook)
+
+    result = table_ops.split_workbook_sheet_by_rows_to_files(
+        source_path="D:/测试/源文件.xlsx",
+        source_sheet_name="源表",
+        output_dir=str(tmp_path),
+        rows_per_part=1,
+        header_row=1,
+        data_start_row=2,
+        name_column="B",
+    )
+
+    assert result["created_file_count"] == 2
+    # 非法字符 / 和 * 应被清理
+    assert any("财务部王主管.xlsx" in p for p in result["output_paths"])
+    assert any("市场运营部李专员.xlsx" in p for p in result["output_paths"])
+
+
+def test_split_by_rows_duplicate_name_column_handling(monkeypatch, tmp_path):
+    source_values = [
+        ["工号", "姓名", "金额"],
+        [1, "张三", 100],
+        [2, "张三", 200],
+        [3, "张三", 300],
+    ]
+    excel = _FakeExcel()
+    workbook = _FakeWorkbook(
+        [{"name": "源表", "values": source_values}],
+        application=excel,
+    )
+    excel.source_workbook = workbook
+    excel.ActiveWorkbook = workbook
+
+    monkeypatch.setattr(table_ops, "_get_or_open_workbook", lambda *args, **kwargs: workbook)
+
+    result = table_ops.split_workbook_sheet_by_rows_to_files(
+        source_path="D:/测试/源文件.xlsx",
+        source_sheet_name="源表",
+        output_dir=str(tmp_path),
+        rows_per_part=1,
+        header_row=1,
+        data_start_row=2,
+        name_column="B",
+    )
+
+    assert result["created_file_count"] == 3
+    file_names = [Path(p).name for p in result["output_paths"]]
+    assert file_names == ["张三.xlsx", "张三_2.xlsx", "张三_3.xlsx"]
+
+
+def test_split_by_rows_cancellation_cleans_up_excel(monkeypatch, tmp_path):
+    source_values = [
+        ["工号", "姓名"],
+        [1, "张三"],
+        [2, "李四"],
+        [3, "王五"],
+    ]
+    excel = _FakeExcel()
+    workbook = _FakeWorkbook(
+        [{"name": "源表", "values": source_values}],
+        application=excel,
+    )
+    excel.source_workbook = workbook
+    excel.ActiveWorkbook = workbook
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=excel,
+            workbook=workbook,
+            owns_excel=True,
+            owns_workbook=True,
+            com_initialized=False,
+        )
+    )
+
+    monkeypatch.setattr(table_ops, "_get_or_open_workbook", lambda *args, **kwargs: workbook)
+
+    cancel_token = table_ops.CancellationToken()
+
+    def progress_callback(current, total, name):
+        if current >= 1:
+            cancel_token.cancel()
+
+    result = table_ops.split_workbook_sheet_by_rows_to_files(
+        source_path="D:/测试/源文件.xlsx",
+        source_sheet_name="源表",
+        output_dir=str(tmp_path),
+        rows_per_part=1,
+        header_row=1,
+        data_start_row=2,
+        cancel_token=cancel_token,
+        progress_callback=progress_callback,
+    )
+
+    assert result.get("cancelled") is True
+    assert result["created_file_count"] == 1
+    assert excel.quit_called is True
+
+
+def test_split_by_column_cancellation_cleans_up_excel(monkeypatch, tmp_path):
+    excel, workbook, source_sheet, _ = _build_file_split_workbook()
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=excel,
+            workbook=workbook,
+            owns_excel=True,
+            owns_workbook=True,
+            com_initialized=False,
+        )
+    )
+    monkeypatch.setattr(table_ops, "_get_or_open_workbook", lambda *args, **kwargs: workbook)
+
+    cancel_token = table_ops.CancellationToken()
+
+    def progress_callback(current, total, name):
+        if current >= 1:
+            cancel_token.cancel()
+
+    result = table_ops.split_workbook_sheet_by_column_to_files(
+        source_path="D:/测试/源文件.xlsx",
+        source_sheet_name="源表",
+        column_input="B",
+        output_dir=str(tmp_path),
+        header_row=1,
+        data_start_row=2,
+        cancel_token=cancel_token,
+        progress_callback=progress_callback,
+    )
+
+    assert result.get("cancelled") is True
+    assert result["created_file_count"] == 1
+    assert excel.quit_called is True
+
+
+def test_cleanup_excel_session_protects_existing_user_excel(monkeypatch):
+    active_excel = _FakeExcel()
+    active_excel.Hwnd = 123456
+    workbook = _FakeWorkbook([], application=active_excel)
+
+    monkeypatch.setattr(table_ops, "get_active_excel", lambda: active_excel)
+
+    table_ops._cleanup_excel_session(active_excel, workbook)
+
+    # 严禁退出用户已有的 Excel
+    assert active_excel.quit_called is False
+    assert workbook.close_calls == []
+
+
+def test_cleanup_excel_session_quits_tool_created_excel():
+    tool_excel = _FakeExcel()
+    tool_excel.Hwnd = 999999
+    excel_id = table_ops._get_excel_id(tool_excel)
+    workbook = _FakeWorkbook([], application=tool_excel)
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=tool_excel,
+            workbook=workbook,
+            owns_excel=True,
+            owns_workbook=True,
+            com_initialized=False,
+        )
+    )
+
+    table_ops._cleanup_excel_session(tool_excel, workbook)
+
+    # 工具独立创建的 Excel 正常退出
+    assert tool_excel.quit_called is True
+    assert workbook.close_calls == [False]
+    assert excel_id not in table_ops._TOOL_CREATED_EXCEL_IDS
+
+
+def test_release_workbook_session_cleans_up_opened_file(monkeypatch):
+    excel = _FakeExcel()
+    excel.Hwnd = 888888
+    excel_id = table_ops._get_excel_id(excel)
+    table_ops._TOOL_CREATED_EXCEL_IDS.add(excel_id)
+
+    workbook = _FakeWorkbook([], application=excel)
+    fake_path = "D:/test_data/temp_source.xlsx"
+    workbook.FullName = fake_path
+    excel.Workbooks._sheets = [workbook]
+
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=excel,
+            workbook=workbook,
+            owns_excel=True,
+            owns_workbook=True,
+            com_initialized=False,
+        )
+    )
+
+    table_ops.release_workbook_session(fake_path)
+
+    assert workbook.close_calls == [False]
+    assert excel.quit_called is True
+
+
+def test_registered_user_excel_and_user_workbook_are_never_closed_or_quit():
+    excel = _FakeExcel()
+    workbook = _FakeWorkbook([], application=excel)
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=excel,
+            workbook=workbook,
+            owns_excel=False,
+            owns_workbook=False,
+            com_initialized=False,
+        )
+    )
+
+    table_ops._cleanup_excel_session(workbook=workbook)
+
+    assert workbook.close_calls == []
+    assert excel.quit_called is False
+
+
+def test_registered_user_excel_and_tool_workbook_only_close_tool_workbook():
+    excel = _FakeExcel()
+    user_workbook = _FakeWorkbook([], name="用户.xlsx", application=excel)
+    tool_workbook = _FakeWorkbook([], name="工具.xlsx", application=excel)
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=excel,
+            workbook=user_workbook,
+            owns_excel=False,
+            owns_workbook=False,
+            com_initialized=False,
+        )
+    )
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=excel,
+            workbook=tool_workbook,
+            owns_excel=False,
+            owns_workbook=True,
+            com_initialized=False,
+        )
+    )
+
+    table_ops._cleanup_excel_session(workbook=tool_workbook)
+
+    assert tool_workbook.close_calls == [False]
+    assert user_workbook.close_calls == []
+    assert excel.quit_called is False
+
+
+def test_get_or_open_workbook_records_user_workbook_ownership_explicitly(monkeypatch, tmp_path):
+    source_path = tmp_path / "source.xlsx"
+    source_path.write_text("fixture", encoding="utf-8")
+    excel = _FakeExcel()
+    excel.Hwnd = 101
+    workbook = _FakeWorkbook([], application=excel)
+    workbook.FullName = str(source_path)
+    excel.Workbooks._sheets = [workbook]
+    monkeypatch.setattr(table_ops, "get_active_excel", lambda: excel)
+
+    opened = table_ops._get_or_open_workbook(str(source_path))
+    session = table_ops._find_workbook_session(opened)
+
+    assert opened is workbook
+    assert session is not None
+    assert session.owns_excel is False
+    assert session.owns_workbook is False
+
+    table_ops._cleanup_excel_session(workbook=opened)
+    assert workbook.close_calls == []
+    assert excel.quit_called is False
+
+
+def test_get_or_open_workbook_marks_only_tool_opened_workbook_owned(monkeypatch, tmp_path):
+    source_path = tmp_path / "tool-opened.xlsx"
+    source_path.write_text("fixture", encoding="utf-8")
+    excel = _FakeExcel()
+    excel.Hwnd = 202
+
+    def open_workbook(path, UpdateLinks=0):
+        workbook = _FakeWorkbook([], name="工具打开.xlsx", application=excel)
+        workbook.FullName = str(path)
+        excel.Workbooks._sheets.append(workbook)
+        return workbook
+
+    excel.Workbooks.Open = open_workbook
+    monkeypatch.setattr(table_ops, "get_active_excel", lambda: excel)
+
+    opened = table_ops._get_or_open_workbook(str(source_path))
+    session = table_ops._find_workbook_session(opened)
+    opened_again = table_ops._get_or_open_workbook(str(source_path))
+
+    assert session is not None
+    assert opened_again is opened
+    assert session.owns_excel is False
+    assert session.owns_workbook is True
+
+    table_ops._cleanup_excel_session(workbook=opened)
+    assert opened.close_calls == [False]
+    assert excel.quit_called is False
+
+
+def test_header_read_uses_one_bulk_range_and_resolves_merged_titles():
+    class HeaderCell:
+        def __init__(self, row, column, merged=False, top_left=None):
+            self.Row = row
+            self.Column = column
+            self.row = row
+            self.column = column
+            self.MergeCells = merged
+            self.MergeArea = top_left
+
+    class HeaderMergeArea:
+        def __init__(self, top_left):
+            self.top_left = top_left
+
+        def Cells(self, row, column):
+            return self.top_left
+
+    class HeaderSheet:
+        Name = "源表"
+
+        def __init__(self):
+            self.values = [
+                ["部门", None, "姓名"],
+                ["编号", "金额", None],
+                [1, 100, "张三"],
+            ]
+            self.range_calls = 0
+            top_left = HeaderCell(1, 1)
+            self.merged_cell = HeaderCell(1, 2, merged=True, top_left=HeaderMergeArea(top_left))
+
+        @property
+        def UsedRange(self):
+            return _FakeUsedRange(self)
+
+        def Cells(self, row, column):
+            if (row, column) == (1, 2):
+                return self.merged_cell
+            return HeaderCell(row, column)
+
+        def Range(self, start_cell, end_cell):
+            self.range_calls += 1
+            return _FakeRange(self, start_cell, end_cell)
+
+    sheet = HeaderSheet()
+
+    columns = table_ops._read_sheet_header_columns_from_sheet(sheet, header_row=2)
+
+    assert columns == [("A", "部门 / 编号"), ("B", "部门 / 金额"), ("C", "姓名")]
+    assert sheet.range_calls == 1
+
+
+def test_sheet_split_keeps_user_workbook_and_excel_alive(monkeypatch):
+    excel, workbook, _, _ = _build_file_split_workbook()
+    table_ops._register_workbook_session(
+        table_ops.WorkbookSession(
+            excel=excel,
+            workbook=workbook,
+            owns_excel=False,
+            owns_workbook=False,
+            com_initialized=False,
+        )
+    )
+    monkeypatch.setattr(table_ops, "_get_or_open_workbook", lambda *args, **kwargs: workbook)
+
+    result = table_ops.split_workbook_sheet_by_column(
+        source_path="D:/测试/源文件.xlsx",
+        source_sheet_name="源表",
+        column_input="B",
+    )
+
+    assert result["created_sheet_count"] == 4
+    assert workbook.close_calls == []
+    assert excel.quit_called is False
 

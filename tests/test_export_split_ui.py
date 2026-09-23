@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from types import SimpleNamespace
 from unittest.mock import Mock
+import threading
+import sys
 
 from src.excel_efficiency_toolkit.ui.features import export_split as export_split_ui
 from src.excel_efficiency_toolkit.ui.features.export_split import ExportSplitController
@@ -780,3 +782,248 @@ def test_split_by_rows_invalid_n(monkeypatch):
 
     logger.error.assert_called_with("输入无效：每份行数必须大于等于 1。")
     button.config.assert_not_called()
+
+
+def test_split_by_column_shows_header_columns_and_selects(monkeypatch):
+    dialogs = SimpleNamespace(
+        ask_text=Mock(return_value="Sheet1"),
+        ask_positive_int=Mock(side_effect=[1, 2]),
+        ask_column=Mock(return_value="B"),
+        ask_choice=Mock(return_value="sheets"),
+        ask_split_preview=Mock(return_value=True),
+        create_progress_cancel_dialog=Mock(return_value=SimpleNamespace(update_message=Mock(), close=Mock())),
+        show_info=Mock(),
+    )
+    logger = Mock()
+    button = Mock()
+    ctx = SimpleNamespace(
+        logger=logger,
+        root=None,
+        dialogs=dialogs,
+        button=Mock(return_value=button),
+    )
+    controller = ExportSplitController(ctx)
+
+    monkeypatch.setattr(
+        export_split_ui.filedialog,
+        "askopenfilename",
+        Mock(return_value="D:/data/source.xlsx"),
+    )
+    monkeypatch.setattr(
+        export_split_ui,
+        "read_sheet_header_columns",
+        Mock(return_value=[("A", "物料编码"), ("B", "物料名称"), ("C", "规格型号")]),
+    )
+    mock_split = Mock(
+        return_value={
+            "workbook_name": "source.xlsx",
+            "source_sheet_name": "Sheet1",
+            "created_sheet_count": 3,
+            "copied_row_count": 15,
+        }
+    )
+    monkeypatch.setattr(export_split_ui, "split_workbook_sheet_by_column", mock_split)
+
+    controller.run_split_sheet()
+
+    dialogs.ask_column.assert_called_once_with(
+        "按列拆分 - 选择拆分列",
+        "请选择或输入要作为拆分依据的列：",
+        columns=[("A", "物料编码"), ("B", "物料名称"), ("C", "规格型号")],
+        default="",
+        allow_empty=False,
+    )
+    dialogs.ask_split_preview.assert_called_once()
+    assert mock_split.call_count == 1
+    assert mock_split.call_args.kwargs["column_input"] == "B"
+    button.config.assert_any_call(state="disabled")
+    button.config.assert_any_call(state="normal")
+
+
+def test_split_by_column_cancel_column_selection(monkeypatch):
+    dialogs = SimpleNamespace(
+        ask_text=Mock(return_value="Sheet1"),
+        ask_positive_int=Mock(side_effect=[1, 2]),
+        ask_column=Mock(return_value=None),
+        ask_choice=Mock(return_value="sheets"),
+        ask_split_preview=Mock(return_value=True),
+        show_info=Mock(),
+    )
+    logger = Mock()
+    button = Mock()
+    ctx = SimpleNamespace(
+        logger=logger,
+        root=None,
+        dialogs=dialogs,
+        button=Mock(return_value=button),
+    )
+    controller = ExportSplitController(ctx)
+
+    monkeypatch.setattr(
+        export_split_ui.filedialog,
+        "askopenfilename",
+        Mock(return_value="D:/data/source.xlsx"),
+    )
+    monkeypatch.setattr(
+        export_split_ui,
+        "read_sheet_header_columns",
+        Mock(return_value=[("A", "物料编码"), ("B", "物料名称")]),
+    )
+    mock_split = Mock()
+    mock_release = Mock()
+    monkeypatch.setattr(export_split_ui, "split_workbook_sheet_by_column", mock_split)
+    monkeypatch.setattr(export_split_ui, "release_workbook_session", mock_release)
+
+    controller.run_split_sheet()
+
+    dialogs.ask_column.assert_called_once()
+    mock_split.assert_not_called()
+    mock_release.assert_called_once_with("D:/data/source.xlsx", logger)
+    logger.info.assert_called_with("用户已取消操作")
+    button.config.assert_not_called()
+
+
+def test_split_by_rows_name_column_selection(monkeypatch):
+    dialogs = SimpleNamespace(
+        ask_text=Mock(return_value="Sheet1"),
+        ask_positive_int=Mock(side_effect=[1, 2]),
+        ask_choice=Mock(side_effect=["each_row", "files"]),
+        ask_column=Mock(return_value="C"),
+        ask_split_preview=Mock(return_value=True),
+        create_progress_cancel_dialog=Mock(return_value=SimpleNamespace(update_message=Mock(), close=Mock())),
+        show_info=Mock(),
+    )
+    logger = Mock()
+    button = Mock()
+    ctx = SimpleNamespace(
+        logger=logger,
+        root=None,
+        dialogs=dialogs,
+        button=Mock(return_value=button),
+    )
+    controller = ExportSplitController(ctx)
+
+    monkeypatch.setattr(
+        export_split_ui.filedialog,
+        "askopenfilename",
+        Mock(return_value="D:/data/source.xlsx"),
+    )
+    monkeypatch.setattr(
+        export_split_ui.filedialog,
+        "askdirectory",
+        Mock(return_value="D:/output_folder"),
+    )
+    monkeypatch.setattr(
+        export_split_ui,
+        "read_sheet_header_columns",
+        Mock(return_value=[("A", "工号"), ("B", "部门"), ("C", "姓名")]),
+    )
+    mock_to_files = Mock(
+        return_value={
+            "workbook_name": "source.xlsx",
+            "source_sheet_name": "Sheet1",
+            "created_file_count": 3,
+            "copied_row_count": 3,
+            "output_dir": "D:/output_folder",
+            "output_paths": ["D:/output_folder/张三.xlsx"],
+        }
+    )
+    monkeypatch.setattr(export_split_ui, "split_workbook_sheet_by_rows_to_files", mock_to_files)
+
+    controller.run_split_rows()
+
+    dialogs.ask_column.assert_called_once_with(
+        "按行拆分 - 文件命名列",
+        "请选择文件名来源列（可选，留空或跳过则使用默认编号命名）：",
+        columns=[("A", "工号"), ("B", "部门"), ("C", "姓名")],
+        default="",
+        allow_empty=True,
+    )
+    assert mock_to_files.call_count == 1
+    assert mock_to_files.call_args.kwargs["name_column"] == "C"
+
+
+def test_split_preview_cancelled(monkeypatch):
+    dialogs = SimpleNamespace(
+        ask_text=Mock(return_value="Sheet1"),
+        ask_positive_int=Mock(side_effect=[1, 2]),
+        ask_column=Mock(return_value="B"),
+        ask_choice=Mock(return_value="sheets"),
+        ask_split_preview=Mock(return_value=False),
+        show_info=Mock(),
+    )
+    logger = Mock()
+    button = Mock()
+    ctx = SimpleNamespace(
+        logger=logger,
+        root=None,
+        dialogs=dialogs,
+        button=Mock(return_value=button),
+    )
+    controller = ExportSplitController(ctx)
+
+    monkeypatch.setattr(
+        export_split_ui.filedialog,
+        "askopenfilename",
+        Mock(return_value="D:/data/source.xlsx"),
+    )
+    monkeypatch.setattr(
+        export_split_ui,
+        "read_sheet_header_columns",
+        Mock(return_value=[("A", "物料编码"), ("B", "物料名称")]),
+    )
+    mock_split = Mock()
+    mock_release = Mock()
+    monkeypatch.setattr(export_split_ui, "split_workbook_sheet_by_column", mock_split)
+    monkeypatch.setattr(export_split_ui, "release_workbook_session", mock_release)
+
+    controller.run_split_sheet()
+
+    dialogs.ask_split_preview.assert_called_once()
+    mock_split.assert_not_called()
+    mock_release.assert_called_once_with("D:/data/source.xlsx", logger)
+    logger.info.assert_called_with("用户已取消操作")
+    button.config.assert_not_called()
+
+
+def test_split_worker_initializes_and_uninitializes_com_on_worker_thread(monkeypatch):
+    class FakePythonCom:
+        initialized = 0
+        uninitialized = 0
+
+        @classmethod
+        def CoInitialize(cls):
+            cls.initialized += 1
+
+        @classmethod
+        def CoUninitialize(cls):
+            cls.uninitialized += 1
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    finished = threading.Event()
+    events = []
+    dialogs = SimpleNamespace()
+    logger = Mock()
+    ctx = SimpleNamespace(
+        logger=logger,
+        root=Root(),
+        dialogs=dialogs,
+        button=Mock(),
+    )
+    controller = ExportSplitController(ctx)
+    monkeypatch.setitem(sys.modules, "pythoncom", FakePythonCom)
+
+    controller._run_worker(
+        lambda: events.append("operation") or {"ok": True},
+        lambda result: events.append(("success", result["ok"])),
+        lambda exc: events.append(("error", str(exc))),
+        finished.set,
+    )
+
+    assert finished.wait(2)
+    assert events == ["operation", ("success", True)]
+    assert FakePythonCom.initialized == 1
+    assert FakePythonCom.uninitialized == 1

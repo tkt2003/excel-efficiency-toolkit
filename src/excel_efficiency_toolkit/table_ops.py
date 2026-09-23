@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+import threading
 
 from .excel_com import get_active_excel
 from .export_ops import EXCEL_FILE_FORMAT_XLSX
@@ -40,6 +41,20 @@ def validate_rows_per_part(rows_per_part: int) -> int:
     return rows_per_part
 
 
+class CancellationToken:
+    """用于拆分等长任务中响应用户取消操作的轻量令牌。"""
+
+    def __init__(self):
+        self._cancelled = threading.Event()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+
 @dataclass(frozen=True)
 class RowSplitPart:
     name: str
@@ -51,6 +66,7 @@ def build_row_split_plans(
     data_start_row: int,
     last_row: int,
     rows_per_part: int = 1,
+    custom_names: list[str] | None = None,
 ) -> list[RowSplitPart]:
     validate_rows_per_part(rows_per_part)
     if last_row < data_start_row:
@@ -61,7 +77,14 @@ def build_row_split_plans(
     current_start = data_start_row
     while current_start <= last_row:
         current_end = min(current_start + rows_per_part - 1, last_row)
-        name = f"数据{batch_index}" if rows_per_part == 1 else f"第{batch_index}批"
+        default_name = f"数据{batch_index}" if rows_per_part == 1 else f"第{batch_index}批"
+        if custom_names is not None and batch_index - 1 < len(custom_names):
+            raw_custom = custom_names[batch_index - 1]
+            cleaned = clean_split_filename(raw_custom)
+            name = cleaned if cleaned else default_name
+        else:
+            name = default_name
+
         plans.append(
             RowSplitPart(
                 name=name,
@@ -107,6 +130,19 @@ def parse_column_index(value: str) -> int:
     for char in column:
         index = index * 26 + (ord(char) - ord("A") + 1)
     return index
+
+
+def get_column_letter(column_index: int) -> str:
+    """将从 1 开始的列号转换为 Excel 列字母（如 1 -> 'A', 26 -> 'Z', 27 -> 'AA'）。"""
+    if isinstance(column_index, bool) or not isinstance(column_index, int) or column_index < 1:
+        raise ValueError("列号必须是大于等于 1 的正整数。")
+    result = []
+    current = column_index
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        result.append(chr(ord("A") + remainder))
+    return "".join(reversed(result))
+
 
 
 def build_split_targets(values: list[object]) -> list[str]:
@@ -246,6 +282,65 @@ def _validate_output_directory(output_dir: str) -> str:
     return normalized_path
 
 
+@dataclass
+class WorkbookSession:
+    """跟踪一次 workbook 使用的 COM 所有权，不用路径推断所有权。"""
+
+    excel: object
+    workbook: object
+    owns_excel: bool
+    owns_workbook: bool
+    com_initialized: bool = True
+
+
+_WORKBOOK_SESSIONS: dict[int, WorkbookSession] = {}
+_EXCEL_SESSION_COUNTS: dict[int, int] = {}
+_TOOL_OWNED_EXCEL_IDS: set[object] = set()
+
+# Excel instance ids are only used to remember explicitly tool-created instances;
+# workbook ownership is always carried by WorkbookSession.
+_TOOL_CREATED_EXCEL_IDS: set[object] = set()
+
+
+def _get_excel_id(excel) -> object:
+    if excel is None:
+        return None
+    hwnd = getattr(excel, "Hwnd", None)
+    if hwnd is not None:
+        return hwnd
+    return id(excel)
+
+
+def _register_workbook_session(session: WorkbookSession) -> None:
+    existing = _find_workbook_session(session.workbook)
+    if existing is not None:
+        return
+    _WORKBOOK_SESSIONS[id(session.workbook)] = session
+    excel_id = _get_excel_id(session.excel)
+    _EXCEL_SESSION_COUNTS[excel_id] = _EXCEL_SESSION_COUNTS.get(excel_id, 0) + 1
+    if session.owns_excel:
+        _TOOL_OWNED_EXCEL_IDS.add(excel_id)
+        _TOOL_CREATED_EXCEL_IDS.add(excel_id)
+
+
+def _find_workbook_session(workbook) -> WorkbookSession | None:
+    if workbook is None:
+        return None
+    return _WORKBOOK_SESSIONS.get(id(workbook))
+
+
+def _find_workbook_session_by_path(normalized_path: str) -> WorkbookSession | None:
+    """仅用于复用同一 COM 对象；ownership 始终读取 session 字段。"""
+    for session in list(_WORKBOOK_SESSIONS.values()):
+        try:
+            path = os.path.normcase(os.path.abspath(str(session.workbook.FullName)))
+        except Exception:
+            continue
+        if path == normalized_path:
+            return session
+    return None
+
+
 def _get_or_open_workbook(source_path: str, logger=None):
     if not source_path:
         raise ValueError("请选择源 Excel 工作簿。")
@@ -254,30 +349,150 @@ def _get_or_open_workbook(source_path: str, logger=None):
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"源工作簿不存在：{abs_path}")
 
+    normalized_path = os.path.normcase(abs_path)
+    existing_session = _find_workbook_session_by_path(normalized_path)
+    if existing_session is not None:
+        _log(logger, "info", f"复用已打开工作簿：{existing_session.workbook.Name}")
+        return existing_session.workbook
+
     _log(logger, "info", "尝试连接当前运行的 Excel 实例...")
     excel = get_active_excel()
+    owns_excel = bool(excel and _get_excel_id(excel) in _TOOL_OWNED_EXCEL_IDS)
     if not excel:
-        import pythoncom
         import win32com.client
 
-        pythoncom.CoInitialize()
-        excel = win32com.client.Dispatch("Excel.Application")
+        try:
+            excel = win32com.client.DispatchEx("Excel.Application")
+        except Exception as exc:
+            raise RuntimeError("无法创建独立的 Excel 实例，请确认 Excel/pywin32 可用。") from exc
         excel.Visible = True
+        owns_excel = True
 
-    normalized_path = os.path.normcase(abs_path)
     for workbook in excel.Workbooks:
         try:
             if os.path.normcase(os.path.abspath(workbook.FullName)) == normalized_path:
                 _log(logger, "info", f"复用已打开工作簿：{workbook.Name}")
+                _register_workbook_session(
+                    WorkbookSession(
+                        excel=excel,
+                        workbook=workbook,
+                        owns_excel=owns_excel,
+                        owns_workbook=owns_excel,
+                    )
+                )
                 return workbook
         except Exception:
             continue
 
     try:
         _log(logger, "info", f"正在打开工作簿：{abs_path}")
-        return excel.Workbooks.Open(abs_path, UpdateLinks=0)
+        workbook = excel.Workbooks.Open(abs_path, UpdateLinks=0)
+        _register_workbook_session(
+            WorkbookSession(
+                excel=excel,
+                workbook=workbook,
+                owns_excel=owns_excel,
+                owns_workbook=True,
+            )
+        )
+        return workbook
     except Exception as e:
+        if owns_excel:
+            _cleanup_excel_session(
+                excel,
+                logger=logger,
+                session=WorkbookSession(
+                    excel=excel,
+                    workbook=None,
+                    owns_excel=True,
+                    owns_workbook=False,
+                ),
+            )
         raise RuntimeError(f"打开源工作簿失败，请确认文件未损坏且未被其他 Excel 实例占用：{e}") from e
+
+
+def _cleanup_excel_session(excel=None, workbook=None, logger=None, session=None) -> None:
+    """按显式 session ownership 释放 workbook、Excel 与当前 COM apartment。"""
+    session = session or _find_workbook_session(workbook)
+    if session is None:
+        return
+
+    if session.workbook is None:
+        excel_id = _get_excel_id(session.excel)
+        if session.owns_excel and session.excel is not None:
+            try:
+                session.excel.Quit()
+            except Exception as exc:
+                _log(logger, "error", f"退出工具创建的 Excel 失败：{exc}")
+            _TOOL_OWNED_EXCEL_IDS.discard(excel_id)
+            _TOOL_CREATED_EXCEL_IDS.discard(excel_id)
+        if session.com_initialized:
+            try:
+                import pythoncom
+                pythoncom.CoUninitialize()
+            except Exception as exc:
+                _log(logger, "error", f"反初始化 Excel COM 失败：{exc}")
+        return
+
+    workbook = session.workbook
+    if workbook is not None and session.owns_workbook:
+        try:
+            workbook.Close(SaveChanges=False)
+        except Exception as exc:
+            _log(logger, "error", f"关闭工具打开的工作簿失败：{exc}")
+
+    workbook_key = id(workbook) if workbook is not None else None
+    if workbook_key in _WORKBOOK_SESSIONS:
+        _WORKBOOK_SESSIONS.pop(workbook_key, None)
+
+    excel_id = _get_excel_id(session.excel)
+    remaining = max(0, _EXCEL_SESSION_COUNTS.get(excel_id, 1) - 1)
+    if workbook is not None:
+        _EXCEL_SESSION_COUNTS[excel_id] = remaining
+    should_quit = remaining == 0 and session.owns_excel
+    if should_quit:
+        try:
+            _log(logger, "info", "释放工具创建的 Excel COM 资源...")
+            session.excel.Quit()
+        except Exception as exc:
+            _log(logger, "error", f"退出工具创建的 Excel 失败：{exc}")
+        _TOOL_OWNED_EXCEL_IDS.discard(excel_id)
+        _TOOL_CREATED_EXCEL_IDS.discard(excel_id)
+    if remaining == 0:
+        _EXCEL_SESSION_COUNTS.pop(excel_id, None)
+
+    if session.com_initialized:
+        try:
+            import pythoncom
+            pythoncom.CoUninitialize()
+        except Exception as exc:
+            _log(logger, "error", f"反初始化 Excel COM 失败：{exc}")
+    try:
+        import gc
+        gc.collect()
+    except Exception:
+        pass
+
+
+def _cleanup_source_workbook(workbook, excel=None, logger=None) -> None:
+    """清理 source workbook；未登记的对象按用户所有处理，不做路径推断。"""
+    if _find_workbook_session(workbook) is not None:
+        _cleanup_excel_session(workbook=workbook, logger=logger)
+        return
+    # 未登记对象的 ownership 不可推断；按用户对象处理，避免误关 Excel。
+
+
+def release_workbook_session(source_path: str | None = None, logger=None, workbook=None) -> None:
+    """释放指定 session；source_path 仅用于定位对象，不参与 ownership 判断。"""
+    session = _find_workbook_session(workbook)
+    if session is None and source_path:
+        session = _find_workbook_session_by_path(
+            os.path.normcase(os.path.abspath(source_path))
+        )
+    if session is not None:
+        _cleanup_excel_session(logger=logger, session=session)
+
+
 
 
 def _get_last_used_row_and_col(sheet) -> tuple[int, int]:
@@ -302,6 +517,176 @@ def _read_range_values(sheet, start_row: int, start_col: int, end_row: int, end_
     col_count = end_col - start_col + 1
     values = sheet.Range(sheet.Cells(start_row, start_col), sheet.Cells(end_row, end_col)).Value
     return _normalize_2d_range_values(values, row_count, col_count)
+
+
+def _read_sheet_header_columns_from_sheet(sheet, header_row: int = 1) -> list[tuple[str, str]]:
+    if header_row < 1:
+        raise ValueError("表头行号必须大于等于 1。")
+
+    _, last_col = _get_last_used_row_and_col(sheet)
+    if last_col < 1:
+        return []
+
+    # 一次读取整个标题区域，避免按单元格调用 COM。Excel 的合并区域只在左上角
+    # 返回值，因此仅对批量读取结果中的空白位置检查 MergeArea。
+    header_values = _read_range_values(sheet, 1, 1, header_row, last_col)
+    for row_values in header_values:
+        while len(row_values) < last_col:
+            row_values.append(None)
+
+    for row_index in range(header_row):
+        for column_index in range(last_col):
+            value = header_values[row_index][column_index]
+            if value is not None and str(value).strip():
+                continue
+            try:
+                cell = sheet.Cells(row_index + 1, column_index + 1)
+                if not getattr(cell, "MergeCells", False):
+                    continue
+                merge_area = getattr(cell, "MergeArea", None)
+                if merge_area is None:
+                    continue
+                top_left = merge_area.Cells(1, 1)
+                top_row = int(getattr(top_left, "Row", getattr(top_left, "row", 0)))
+                top_col = int(getattr(top_left, "Column", getattr(top_left, "column", 0)))
+                if 1 <= top_row <= header_row and 1 <= top_col <= last_col:
+                    value = header_values[top_row - 1][top_col - 1]
+                else:
+                    value = getattr(top_left, "Value", None)
+                if value is not None:
+                    header_values[row_index][column_index] = value
+            except Exception:
+                # 合并区域属性在不同 Excel 版本/代理对象上可能不可读；保留空标题。
+                continue
+
+    columns: list[tuple[str, str]] = []
+    for c in range(1, last_col + 1):
+        col_letter = get_column_letter(c)
+        row_values: list[str] = []
+
+        for r in range(header_row):
+            value = header_values[r][c - 1]
+            text = "" if value is None else str(value).strip()
+            if text.lower() in ("none", "nan"):
+                text = ""
+            row_values.append(text)
+
+        target_title = row_values[-1]  # 目标表头行
+        # 向上查找最近非空单元格
+        up_title = ""
+        for r_idx in range(len(row_values) - 2, -1, -1):
+            if row_values[r_idx]:
+                up_title = row_values[r_idx]
+                break
+
+        if not target_title:
+            final_title = up_title
+        else:
+            if up_title and up_title != target_title:
+                final_title = f"{up_title} / {target_title}"
+            else:
+                final_title = target_title
+
+        columns.append((col_letter, final_title))
+
+    return columns
+
+
+def read_sheet_header_columns(
+    sheet_or_path,
+    header_row: int = 1,
+    source_sheet_name: str | None = None,
+    logger=None,
+) -> list[tuple[str, str]]:
+    """读取工作表表头各列（列字母, 组合标题）。
+
+    支持直接传入 Worksheet 对象，或传入文件路径 (source_path)。
+    """
+    if isinstance(sheet_or_path, (str, os.PathLike)):
+        source_workbook = _get_or_open_workbook(str(sheet_or_path), logger=logger)
+        try:
+            sheet_names = [sheet.Name for sheet in source_workbook.Worksheets]
+            resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
+            sheet = source_workbook.Worksheets(resolved_name)
+            return _read_sheet_header_columns_from_sheet(sheet, header_row)
+        finally:
+            _cleanup_excel_session(workbook=source_workbook, logger=logger)
+    return _read_sheet_header_columns_from_sheet(sheet_or_path, header_row)
+
+
+def get_split_preview_info(
+    source_path: str,
+    source_sheet_name: str | None,
+    header_row: int,
+    data_start_row: int,
+    split_mode: str,
+    split_arg: object,
+    output_mode: str = "sheets",
+    name_column: str | None = None,
+    logger=None,
+) -> dict[str, str]:
+    """生成拆分执行前的摘要预览信息字典。"""
+    target_unit = "个 Excel 文件" if output_mode == "files" else "个工作表"
+    default_sheet_name = source_sheet_name or "当前工作表"
+    default_res = {
+        "source_sheet_name": default_sheet_name,
+        "data_row_count": "未知",
+        "split_mode_desc": "",
+        "name_column_desc": "无",
+        "estimated_count_desc": f"待定 ({target_unit})",
+    }
+    workbook = None
+    try:
+        workbook = _get_or_open_workbook(source_path, logger)
+        sheet_names = [s.Name for s in workbook.Worksheets]
+        resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
+        sheet = workbook.Worksheets(resolved_name)
+        last_row, last_col = _get_last_used_row_and_col(sheet)
+        data_row_count = max(0, last_row - data_start_row + 1)
+
+        if split_mode == "column":
+            col_input = str(split_arg)
+            col_idx = parse_column_index(col_input)
+            if data_row_count > 0 and col_idx <= last_col:
+                values = [
+                    row[0]
+                    for row in _read_range_values(
+                        sheet, data_start_row, col_idx, last_row, col_idx
+                    )
+                ]
+                targets = build_split_targets(values)
+                est_count = len(targets)
+            else:
+                est_count = 0
+            split_mode_desc = f"按列拆分（列 {col_input}）"
+            name_col_desc = "按拆分列值命名"
+        else:  # "rows"
+            rows_per_part = int(split_arg) if split_arg else 1
+            est_count = (data_row_count + rows_per_part - 1) // rows_per_part if data_row_count > 0 else 0
+            split_mode_desc = "每行一份" if rows_per_part == 1 else f"每 {rows_per_part} 行一份"
+            name_col_desc = f"列 {name_column}" if name_column else "默认编号命名"
+
+        return {
+            "source_sheet_name": resolved_name,
+            "data_row_count": f"{data_row_count} 行",
+            "split_mode_desc": split_mode_desc,
+            "name_column_desc": name_col_desc,
+            "estimated_count_desc": f"{est_count} {target_unit}",
+        }
+    except Exception as e:
+        _log(logger, "warning", f"无法预计算拆分摘要信息，采用默认显示：{e}")
+        if split_mode == "column":
+            default_res["split_mode_desc"] = f"按列拆分（列 {split_arg}）"
+            default_res["name_column_desc"] = "按拆分列值命名"
+        else:
+            rows_per_part = int(split_arg) if split_arg else 1
+            default_res["split_mode_desc"] = "每行一份" if rows_per_part == 1 else f"每 {rows_per_part} 行一份"
+            default_res["name_column_desc"] = f"列 {name_column}" if name_column else "默认编号命名"
+        return default_res
+    finally:
+        if workbook is not None:
+            _cleanup_excel_session(workbook=workbook, logger=logger)
+
 
 
 def _write_range_values(sheet, start_row: int, start_col: int, values: list[list[object]]) -> None:
@@ -602,6 +987,8 @@ def _split_workbook_sheet_by_column(
     header_row: int = 1,
     data_start_row: int = 2,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     split_values, targets = _collect_split_values(
         source_sheet,
@@ -614,8 +1001,20 @@ def _split_workbook_sheet_by_column(
     existing_names = _get_workbook_sheet_names(workbook)
     created_sheet_count = 0
     copied_row_count = 0
+    cancelled = False
 
-    for target in targets:
+    for index, target in enumerate(targets, start=1):
+        if cancel_token is not None and getattr(cancel_token, "is_cancelled", False):
+            cancelled = True
+            _log(logger, "info", "检测到用户取消操作，正在停止后续任务...")
+            break
+
+        if progress_callback is not None:
+            try:
+                progress_callback(index, len(targets), target)
+            except Exception:
+                pass
+
         safe_name = get_safe_sheet_name(target, fallback="空白")
         unique_name = get_unique_sheet_name(safe_name, existing_names)
         _, _, kept_row_count = _copy_sheet_and_delete_non_target_rows(
@@ -632,13 +1031,18 @@ def _split_workbook_sheet_by_column(
         copied_row_count += kept_row_count
         _log(logger, "info", f"已生成工作表：{unique_name}，复制 {kept_row_count} 行。")
 
-    _log(logger, "info", f"拆分完成，共生成 {created_sheet_count} 个工作表，复制 {copied_row_count} 行。")
-    return {
+    if not cancelled:
+        _log(logger, "info", f"拆分完成，共生成 {created_sheet_count} 个工作表，复制 {copied_row_count} 行。")
+    res = {
         "workbook_name": workbook.Name,
         "source_sheet_name": source_sheet.Name,
         "created_sheet_count": created_sheet_count,
         "copied_row_count": copied_row_count,
     }
+    if cancelled:
+        res["cancelled"] = True
+    return res
+
 
 
 def split_active_sheet_by_column(
@@ -646,6 +1050,8 @@ def split_active_sheet_by_column(
     header_row: int = 1,
     data_start_row: int = 2,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     _log(logger, "info", "尝试连接当前运行的 Excel 实例...")
     excel = get_active_excel()
@@ -667,6 +1073,8 @@ def split_active_sheet_by_column(
         header_row=header_row,
         data_start_row=data_start_row,
         logger=logger,
+        cancel_token=cancel_token,
+        progress_callback=progress_callback,
     )
 
 
@@ -677,20 +1085,34 @@ def split_workbook_sheet_by_column(
     header_row: int = 1,
     data_start_row: int = 2,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
-    workbook = _get_or_open_workbook(source_path, logger)
-    sheet_names = [sheet.Name for sheet in workbook.Worksheets]
-    resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
-    source_sheet = workbook.Worksheets(resolved_name)
+    workbook = None
+    try:
+        workbook = _get_or_open_workbook(source_path, logger)
+        sheet_names = [sheet.Name for sheet in workbook.Worksheets]
+        resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
+        source_sheet = workbook.Worksheets(resolved_name)
 
-    return _split_workbook_sheet_by_column(
-        workbook,
-        source_sheet,
-        column_input=column_input,
-        header_row=header_row,
-        data_start_row=data_start_row,
-        logger=logger,
-    )
+        return _split_workbook_sheet_by_column(
+            workbook,
+            source_sheet,
+            column_input=column_input,
+            header_row=header_row,
+            data_start_row=data_start_row,
+            logger=logger,
+            cancel_token=cancel_token,
+            progress_callback=progress_callback,
+        )
+    finally:
+        if workbook is not None:
+            _cleanup_source_workbook(
+                workbook,
+                getattr(workbook, "Application", None),
+                logger=logger,
+            )
+
 
 
 def _split_workbook_sheet_by_rows(
@@ -699,16 +1121,37 @@ def _split_workbook_sheet_by_rows(
     rows_per_part: int = 1,
     header_row: int = 1,
     data_start_row: int = 2,
+    name_column: str | int | None = None,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     validate_row_numbers(header_row, data_start_row)
     validate_rows_per_part(rows_per_part)
 
-    last_row, _ = _get_last_used_row_and_col(source_sheet)
+    last_row, last_col = _get_last_used_row_and_col(source_sheet)
+
+    custom_names = None
+    if name_column is not None and str(name_column).strip():
+        name_col_idx = parse_column_index(str(name_column))
+        if name_col_idx > last_col:
+            raise RuntimeError("文件名来源列超出当前工作表的有效区域。")
+        col_values = _read_range_values(
+            source_sheet, data_start_row, name_col_idx, last_row, name_col_idx
+        )
+        if rows_per_part == 1:
+            custom_names = ["" if r[0] is None else str(r[0]).strip() for r in col_values]
+        else:
+            custom_names = []
+            for start_idx in range(0, len(col_values), rows_per_part):
+                val = col_values[start_idx][0]
+                custom_names.append("" if val is None else str(val).strip())
+
     plans = build_row_split_plans(
         data_start_row=data_start_row,
         last_row=last_row,
         rows_per_part=rows_per_part,
+        custom_names=custom_names,
     )
 
     _log(
@@ -720,8 +1163,20 @@ def _split_workbook_sheet_by_rows(
     existing_names = _get_workbook_sheet_names(workbook)
     created_sheet_count = 0
     copied_row_count = 0
+    cancelled = False
 
-    for part in plans:
+    for index, part in enumerate(plans, start=1):
+        if cancel_token is not None and getattr(cancel_token, "is_cancelled", False):
+            cancelled = True
+            _log(logger, "info", "检测到用户取消操作，正在停止后续任务...")
+            break
+
+        if progress_callback is not None:
+            try:
+                progress_callback(index, len(plans), part.name)
+            except Exception:
+                pass
+
         safe_name = get_safe_sheet_name(part.name, fallback="数据")
         unique_name = get_unique_sheet_name(safe_name, existing_names)
         _, _, kept_row_count = _copy_sheet_and_keep_row_range(
@@ -743,21 +1198,29 @@ def _split_workbook_sheet_by_rows(
             f"已生成工作表：{unique_name}，保留第 {part.keep_start_row}~{part.keep_end_row} 行（共 {kept_row_count} 行）。",
         )
 
-    _log(logger, "info", f"按行拆分完成，共生成 {created_sheet_count} 个工作表，复制 {copied_row_count} 行。")
-    return {
+    if not cancelled:
+        _log(logger, "info", f"按行拆分完成，共生成 {created_sheet_count} 个工作表，复制 {copied_row_count} 行。")
+    res = {
         "workbook_name": workbook.Name,
         "source_sheet_name": source_sheet.Name,
         "created_sheet_count": created_sheet_count,
         "copied_row_count": copied_row_count,
         "rows_per_part": rows_per_part,
     }
+    if cancelled:
+        res["cancelled"] = True
+    return res
+
 
 
 def split_active_sheet_by_rows(
     rows_per_part: int = 1,
     header_row: int = 1,
     data_start_row: int = 2,
+    name_column: str | int | None = None,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     validate_row_numbers(header_row, data_start_row)
     validate_rows_per_part(rows_per_part)
@@ -781,7 +1244,10 @@ def split_active_sheet_by_rows(
         rows_per_part=rows_per_part,
         header_row=header_row,
         data_start_row=data_start_row,
+        name_column=name_column,
         logger=logger,
+        cancel_token=cancel_token,
+        progress_callback=progress_callback,
     )
 
 
@@ -791,24 +1257,39 @@ def split_workbook_sheet_by_rows(
     rows_per_part: int = 1,
     header_row: int = 1,
     data_start_row: int = 2,
+    name_column: str | int | None = None,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     validate_row_numbers(header_row, data_start_row)
     validate_rows_per_part(rows_per_part)
 
-    workbook = _get_or_open_workbook(source_path, logger)
-    sheet_names = [sheet.Name for sheet in workbook.Worksheets]
-    resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
-    source_sheet = workbook.Worksheets(resolved_name)
+    workbook = None
+    try:
+        workbook = _get_or_open_workbook(source_path, logger)
+        sheet_names = [sheet.Name for sheet in workbook.Worksheets]
+        resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
+        source_sheet = workbook.Worksheets(resolved_name)
 
-    return _split_workbook_sheet_by_rows(
-        workbook,
-        source_sheet,
-        rows_per_part=rows_per_part,
-        header_row=header_row,
-        data_start_row=data_start_row,
-        logger=logger,
-    )
+        return _split_workbook_sheet_by_rows(
+            workbook,
+            source_sheet,
+            rows_per_part=rows_per_part,
+            header_row=header_row,
+            data_start_row=data_start_row,
+            name_column=name_column,
+            logger=logger,
+            cancel_token=cancel_token,
+            progress_callback=progress_callback,
+        )
+    finally:
+        if workbook is not None:
+            _cleanup_source_workbook(
+                workbook,
+                getattr(workbook, "Application", None),
+                logger=logger,
+            )
 
 
 def _get_split_output_settings(source_path: str, op_name: str = "按列拆分") -> tuple[str, int]:
@@ -841,6 +1322,8 @@ def _split_workbook_sheet_by_column_to_files(
     header_row: int = 1,
     data_start_row: int = 2,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     split_values, targets = _collect_split_values(
         source_sheet,
@@ -853,8 +1336,20 @@ def _split_workbook_sheet_by_column_to_files(
     output_paths: list[str] = []
     reserved_paths: set[str] = set()
     copied_row_count = 0
+    cancelled = False
 
-    for target in targets:
+    for index, target in enumerate(targets, start=1):
+        if cancel_token is not None and getattr(cancel_token, "is_cancelled", False):
+            cancelled = True
+            _log(logger, "info", "检测到用户取消操作，正在停止后续任务...")
+            break
+
+        if progress_callback is not None:
+            try:
+                progress_callback(index, len(targets), target)
+            except Exception:
+                pass
+
         sheet_name = get_safe_sheet_name(target, fallback="空白")
         file_base_name = get_safe_split_filename(target, fallback="空白")
         output_path = get_unique_split_filepath(
@@ -867,7 +1362,7 @@ def _split_workbook_sheet_by_column_to_files(
 
         output_workbook = None
         try:
-            output_workbook, _, kept_row_count = _copy_sheet_and_delete_non_target_rows(
+            output_workbook, temp_sheet, kept_row_count = _copy_sheet_and_delete_non_target_rows(
                 source_workbook,
                 source_sheet,
                 split_values,
@@ -875,11 +1370,16 @@ def _split_workbook_sheet_by_column_to_files(
                 data_start_row,
                 sheet_name=sheet_name,
             )
+            del temp_sheet
+            import gc
+            gc.collect()
+
             output_workbook.SaveAs(
                 os.path.abspath(output_path),
                 FileFormat=output_file_format,
             )
             output_workbook.Close(SaveChanges=False)
+            del output_workbook
             output_workbook = None
         except Exception:
             if output_workbook is not None:
@@ -890,8 +1390,9 @@ def _split_workbook_sheet_by_column_to_files(
         copied_row_count += kept_row_count
         _log(logger, "info", f"已生成文件：{output_path}，复制 {kept_row_count} 行。")
 
-    _log(logger, "info", f"拆分完成，共生成 {len(output_paths)} 个文件，复制 {copied_row_count} 行。")
-    return {
+    if not cancelled:
+        _log(logger, "info", f"拆分完成，共生成 {len(output_paths)} 个文件，复制 {copied_row_count} 行。")
+    res = {
         "workbook_name": source_workbook.Name,
         "source_sheet_name": source_sheet.Name,
         "created_file_count": len(output_paths),
@@ -899,6 +1400,10 @@ def _split_workbook_sheet_by_column_to_files(
         "output_dir": output_dir,
         "output_paths": output_paths,
     }
+    if cancelled:
+        res["cancelled"] = True
+    return res
+
 
 
 def split_workbook_sheet_by_column_to_files(
@@ -909,26 +1414,54 @@ def split_workbook_sheet_by_column_to_files(
     header_row: int = 1,
     data_start_row: int = 2,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     output_extension, output_file_format = _get_split_output_settings(source_path)
     normalized_output_dir = _validate_output_directory(output_dir)
 
-    source_workbook = _get_or_open_workbook(source_path, logger)
-    sheet_names = [sheet.Name for sheet in source_workbook.Worksheets]
-    resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
-    source_sheet = source_workbook.Worksheets(resolved_name)
+    source_workbook = None
+    source_sheet = None
+    sheet_names = None
+    excel = None
+    result = None
+    try:
+        source_workbook = _get_or_open_workbook(source_path, logger)
+        excel = getattr(source_workbook, "Application", None)
+        sheet_names = [sheet.Name for sheet in source_workbook.Worksheets]
+        resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
+        source_sheet = source_workbook.Worksheets(resolved_name)
 
-    return _split_workbook_sheet_by_column_to_files(
-        source_workbook,
-        source_sheet,
-        column_input=column_input,
-        output_dir=normalized_output_dir,
-        output_extension=output_extension,
-        output_file_format=output_file_format,
-        header_row=header_row,
-        data_start_row=data_start_row,
-        logger=logger,
-    )
+        result = _split_workbook_sheet_by_column_to_files(
+            source_workbook,
+            source_sheet,
+            column_input=column_input,
+            output_dir=normalized_output_dir,
+            output_extension=output_extension,
+            output_file_format=output_file_format,
+            header_row=header_row,
+            data_start_row=data_start_row,
+            logger=logger,
+            cancel_token=cancel_token,
+            progress_callback=progress_callback,
+        )
+        return result
+    finally:
+        del source_sheet
+        del sheet_names
+        import gc
+        gc.collect()
+        if source_workbook is not None:
+            wb = source_workbook
+            source_workbook = None
+            ex = excel
+            excel = None
+            _cleanup_source_workbook(wb, ex, logger=logger)
+            del wb
+            del ex
+            gc.collect()
+
+
 
 def _split_workbook_sheet_by_rows_to_files(
     source_workbook,
@@ -939,16 +1472,37 @@ def _split_workbook_sheet_by_rows_to_files(
     rows_per_part: int = 1,
     header_row: int = 1,
     data_start_row: int = 2,
+    name_column: str | int | None = None,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     validate_row_numbers(header_row, data_start_row)
     validate_rows_per_part(rows_per_part)
 
-    last_row, _ = _get_last_used_row_and_col(source_sheet)
+    last_row, last_col = _get_last_used_row_and_col(source_sheet)
+
+    custom_names = None
+    if name_column is not None and str(name_column).strip():
+        name_col_idx = parse_column_index(str(name_column))
+        if name_col_idx > last_col:
+            raise RuntimeError("文件名来源列超出当前工作表的有效区域。")
+        col_values = _read_range_values(
+            source_sheet, data_start_row, name_col_idx, last_row, name_col_idx
+        )
+        if rows_per_part == 1:
+            custom_names = ["" if r[0] is None else str(r[0]).strip() for r in col_values]
+        else:
+            custom_names = []
+            for start_idx in range(0, len(col_values), rows_per_part):
+                val = col_values[start_idx][0]
+                custom_names.append("" if val is None else str(val).strip())
+
     plans = build_row_split_plans(
         data_start_row=data_start_row,
         last_row=last_row,
         rows_per_part=rows_per_part,
+        custom_names=custom_names,
     )
 
     _log(
@@ -960,8 +1514,20 @@ def _split_workbook_sheet_by_rows_to_files(
     output_paths: list[str] = []
     reserved_paths: set[str] = set()
     copied_row_count = 0
+    cancelled = False
 
-    for part in plans:
+    for index, part in enumerate(plans, start=1):
+        if cancel_token is not None and getattr(cancel_token, "is_cancelled", False):
+            cancelled = True
+            _log(logger, "info", "检测到用户取消操作，正在停止后续任务...")
+            break
+
+        if progress_callback is not None:
+            try:
+                progress_callback(index, len(plans), part.name)
+            except Exception:
+                pass
+
         sheet_name = get_safe_sheet_name(part.name, fallback="数据")
         file_base_name = get_safe_split_filename(part.name, fallback="数据")
         output_path = get_unique_split_filepath(
@@ -974,7 +1540,7 @@ def _split_workbook_sheet_by_rows_to_files(
 
         output_workbook = None
         try:
-            output_workbook, _, kept_row_count = _copy_sheet_and_keep_row_range(
+            output_workbook, temp_sheet, kept_row_count = _copy_sheet_and_keep_row_range(
                 source_workbook,
                 source_sheet,
                 data_start_row=data_start_row,
@@ -983,11 +1549,15 @@ def _split_workbook_sheet_by_rows_to_files(
                 keep_end_row=part.keep_end_row,
                 sheet_name=sheet_name,
             )
+            del temp_sheet
+            import gc
+            gc.collect()
             output_workbook.SaveAs(
                 os.path.abspath(output_path),
                 FileFormat=output_file_format,
             )
             output_workbook.Close(SaveChanges=False)
+            del output_workbook
             output_workbook = None
         except Exception:
             if output_workbook is not None:
@@ -998,8 +1568,9 @@ def _split_workbook_sheet_by_rows_to_files(
         copied_row_count += kept_row_count
         _log(logger, "info", f"已生成文件：{output_path}，复制 {kept_row_count} 行。")
 
-    _log(logger, "info", f"按行拆分完成，共生成 {len(output_paths)} 个文件，复制 {copied_row_count} 行。")
-    return {
+    if not cancelled:
+        _log(logger, "info", f"按行拆分完成，共生成 {len(output_paths)} 个文件，复制 {copied_row_count} 行。")
+    res = {
         "workbook_name": source_workbook.Name,
         "source_sheet_name": source_sheet.Name,
         "created_file_count": len(output_paths),
@@ -1008,6 +1579,10 @@ def _split_workbook_sheet_by_rows_to_files(
         "output_dir": output_dir,
         "output_paths": output_paths,
     }
+    if cancelled:
+        res["cancelled"] = True
+    return res
+
 
 
 def split_workbook_sheet_by_rows_to_files(
@@ -1017,7 +1592,10 @@ def split_workbook_sheet_by_rows_to_files(
     rows_per_part: int = 1,
     header_row: int = 1,
     data_start_row: int = 2,
+    name_column: str | int | None = None,
     logger=None,
+    cancel_token=None,
+    progress_callback=None,
 ) -> dict:
     validate_row_numbers(header_row, data_start_row)
     validate_rows_per_part(rows_per_part)
@@ -1027,19 +1605,44 @@ def split_workbook_sheet_by_rows_to_files(
     )
     normalized_output_dir = _validate_output_directory(output_dir)
 
-    source_workbook = _get_or_open_workbook(source_path, logger)
-    sheet_names = [sheet.Name for sheet in source_workbook.Worksheets]
-    resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
-    source_sheet = source_workbook.Worksheets(resolved_name)
+    source_workbook = None
+    source_sheet = None
+    sheet_names = None
+    excel = None
+    result = None
+    try:
+        source_workbook = _get_or_open_workbook(source_path, logger)
+        excel = getattr(source_workbook, "Application", None)
+        sheet_names = [sheet.Name for sheet in source_workbook.Worksheets]
+        resolved_name = resolve_source_sheet_name(source_sheet_name, sheet_names)
+        source_sheet = source_workbook.Worksheets(resolved_name)
 
-    return _split_workbook_sheet_by_rows_to_files(
-        source_workbook,
-        source_sheet,
-        output_dir=normalized_output_dir,
-        output_extension=output_extension,
-        output_file_format=output_file_format,
-        rows_per_part=rows_per_part,
-        header_row=header_row,
-        data_start_row=data_start_row,
-        logger=logger,
-    )
+        result = _split_workbook_sheet_by_rows_to_files(
+            source_workbook,
+            source_sheet,
+            output_dir=normalized_output_dir,
+            output_extension=output_extension,
+            output_file_format=output_file_format,
+            rows_per_part=rows_per_part,
+            header_row=header_row,
+            data_start_row=data_start_row,
+            name_column=name_column,
+            logger=logger,
+            cancel_token=cancel_token,
+            progress_callback=progress_callback,
+        )
+        return result
+    finally:
+        del source_sheet
+        del sheet_names
+        import gc
+        gc.collect()
+        if source_workbook is not None:
+            wb = source_workbook
+            source_workbook = None
+            ex = excel
+            excel = None
+            _cleanup_source_workbook(wb, ex, logger=logger)
+            del wb
+            del ex
+            gc.collect()

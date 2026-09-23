@@ -53,3 +53,12 @@ class FeatureController:
 
     def ask_positive_int(self, *args, **kwargs):
         return self.ctx.dialogs.ask_positive_int(*args, **kwargs)
+
+    def ask_column(self, *args, **kwargs):
+        return self.ctx.dialogs.ask_column(*args, **kwargs)
+
+    def ask_split_preview(self, *args, **kwargs):
+        return self.ctx.dialogs.ask_split_preview(*args, **kwargs)
+
+    def create_progress_cancel_dialog(self, *args, **kwargs):
+        return self.ctx.dialogs.create_progress_cancel_dialog(*args, **kwargs)
